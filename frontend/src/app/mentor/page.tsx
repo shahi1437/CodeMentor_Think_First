@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   Send,
   Bot,
@@ -24,6 +24,7 @@ export default function AIMentorPage() {
   const [isTyping, setIsTyping] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [mode, setMode] = useState<'socratic' | 'conceptual'>('socratic');
+  const nextMessageId = useRef(0);
 
   const handleSend = async (textToSend?: string) => {
     const userText = (textToSend ?? input).trim();
@@ -35,7 +36,7 @@ export default function AIMentorPage() {
     }));
     const timestamp = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
     const userMessage: Message = {
-      id: `u-${Date.now()}`,
+      id: `u-${nextMessageId.current++}`,
       sender: 'user',
       text: userText,
       timestamp,
@@ -82,7 +83,7 @@ export default function AIMentorPage() {
       }
 
       setMessages((previous) => [...previous, {
-        id: `a-${Date.now()}`,
+        id: `a-${nextMessageId.current++}`,
         sender: 'assistant',
         text: result.answer,
         timestamp: new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),

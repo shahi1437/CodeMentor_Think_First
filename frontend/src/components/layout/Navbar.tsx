@@ -34,7 +34,6 @@ export const Navbar: React.FC = () => {
   useEffect(() => {
     const supabase = getSupabaseBrowserClient();
     if (!supabase) {
-      setIsSignedIn(false);
       return;
     }
 

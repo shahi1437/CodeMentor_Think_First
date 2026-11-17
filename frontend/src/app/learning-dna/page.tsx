@@ -34,8 +34,6 @@ export default function LearningDNAPage() {
   const [errorMessage, setErrorMessage] = useState('');
 
   const loadProfile = useCallback(async () => {
-    setIsLoading(true);
-    setErrorMessage('');
     try {
       const supabase = getSupabaseBrowserClient();
       if (!supabase) {
@@ -65,8 +63,14 @@ export default function LearningDNAPage() {
   }, []);
 
   useEffect(() => {
-    void loadProfile();
+    void Promise.resolve().then(loadProfile);
   }, [loadProfile]);
+
+  const refreshProfile = () => {
+    setIsLoading(true);
+    setErrorMessage('');
+    void loadProfile();
+  };
 
   const overallAcceptedRate = profile && profile.submission_count > 0
     ? Math.round((profile.accepted_submission_count / profile.submission_count) * 100)
@@ -91,7 +95,7 @@ export default function LearningDNAPage() {
           </div>
 
           <button
-            onClick={() => void loadProfile()}
+            onClick={refreshProfile}
             disabled={isLoading}
             className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-navy-900 px-3 py-1.5 text-xs font-medium text-slate-300 hover:bg-slate-800 transition-colors"
           >
@@ -110,7 +114,7 @@ export default function LearningDNAPage() {
         {errorMessage && (
           <div role="alert" className="mt-8 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-xs text-rose-300">
             <span>{errorMessage}</span>
-            <button onClick={() => void loadProfile()} className="rounded-lg border border-rose-400/30 px-3 py-1.5 font-semibold hover:bg-rose-500/10">
+            <button onClick={refreshProfile} className="rounded-lg border border-rose-400/30 px-3 py-1.5 font-semibold hover:bg-rose-500/10">
               Retry
             </button>
           </div>

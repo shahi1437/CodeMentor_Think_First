@@ -1,7 +1,8 @@
 # CodeMentor AI — Implementation Status
 
 ## Current branch
-- `main`
+- `feature/complete-production-launch`, based on `origin/main` at `dd67f0b`.
+- Current milestone changes are uncommitted and have not been pushed or opened as a PR.
 
 ## Supabase production audit (2026-11-18)
 - Existing project `codementor-ai-prod` (`ap-northeast-1`) is active and linked
@@ -26,7 +27,7 @@
   policy scope is corrected and tested.
 - No local `.env`, `backend/.env`, or `frontend/.env.local` exists. Backend
   connectivity from the application and test-account data-isolation tests
-  could not be run. Backend unit suite: 74 passed; two deprecation warnings.
+  could not be run. Backend unit suite: 80 passed; two deprecation warnings.
 - The duplicate local migration version was resolved by renaming the
   hidden-column migration to `20261118000100_problem_hidden_column_security.sql`;
   its SHA-256 was unchanged. Migration history now records all five versions
@@ -34,6 +35,10 @@
 - Remote schema effects match all five migrations. The history repair records
   the verified versions but does not prove when their SQL was originally
   executed. Teacher policies remain broader than the intended course scope.
+- The latest read-only `npx supabase migration list --remote` confirms the five
+  baseline versions are recorded and `20261121000100_scope_course_data_rls.sql`
+  is pending. No migration repair, SQL deployment, or other production database
+  mutation was run for this milestone.
 
 ## Migration inventory
 
@@ -48,7 +53,7 @@ was run.
 | `20261118000100_problem_hidden_column_security.sql` (renamed from duplicate `20261118`) | No tables or columns created. | Revokes client table/column SELECT and re-grants selected public `problems` columns; no index/constraint/policy changes. Depends on `public.problems`. | Recorded as applied after explicit approval; exact column grants match. |
 | `20261119_harden_profile_role_rls.sql` | No tables or columns created. | Replaces role helper functions and three profile policies; no indexes/constraints. Depends on `user_role`, `profiles`, and authenticated role. | Recorded as applied after explicit approval; hardened functions/policies match. |
 | `20261120_problem_catalog_metadata.sql` | Adds `problems.problem_mode`, `tags`, `supported_languages`, `progressive_hints`; creates `problem_hint_progress(user_id, problem_id, tier, requested_at)`. | Enables RLS and revokes client access to hint progress; PK `(user_id, problem_id, tier)`, profile/problem FKs, tier 1-4 check, PK index. Depends on `profiles` and `problems`. | Recorded as applied after explicit approval; columns and table match. |
-| `20261121000100_scope_course_data_rls.sql` | No tables or columns created. | Replaces broad profile/conversation reads with active-enrollment checks; removes student submission writes and self-managed enrollments; binds mentor messages to the user's own conversation and role. Teachers receive no submission reads because problems are not related to courses. Depends on baseline profile/course/enrollment/submission/mentor tables and role helpers. | Local only; not applied. Requires isolated RLS tests and explicit production approval. |
+| `20261121000100_scope_course_data_rls.sql` | No tables or columns created. | Replaces broad profile/conversation reads with active-enrollment checks; removes student submission writes and self-managed enrollments; binds mentor messages to the user's own conversation and role. Teachers receive no submission reads because problems are not related to courses. Depends on baseline profile/course/enrollment/submission/mentor tables and role helpers. | Confirmed absent from the latest read-only remote migration list; pending. Requires isolated RLS tests and explicit production approval. |
 
 The platform migration's full column definitions, indexes, triggers, and
 constraints remain in the SQL source. Their remote definitions match the
@@ -128,7 +133,7 @@ The new RLS hardening migration remains pending.
 - Phase 2 Supabase frontend authentication: complete and tested.
 - Database-backed role repository: implemented with Supabase/PostgreSQL persistence.
 - Server-side RBAC and role verification: implemented and tested.
-- Backend suite: 74 tests passed in the latest run (two dependency/API deprecation warnings).
+- Backend suite: 80 tests passed in the latest run (two dependency/API deprecation warnings).
 - Frontend production build: successful in the latest run.
 - The Supabase connection was used for read-only schema catalog checks and an approved metadata-only history repair; backend/authenticated-client, Judge0, and LLM live behavior are not verified.
 
@@ -158,14 +163,14 @@ The new RLS hardening migration remains pending.
 - Hint unlock progress is persisted per student and problem; the API rejects attempts to skip tiers.
 - Problem Hub supports database-backed difficulty, mode, topic, and language filtering.
 - Problem CRUD/publishing UI, adaptive challenge selection, hint/time/attempt analytics, and execution rate limiting remain incomplete.
+- The administrator problem list reads persisted records, but create/edit/publish controls and variant verification remain unavailable; simulated success actions were removed.
 - Submission grading uses backend-controlled records, but live DB/Judge0 validation is pending.
 - Student submission history omits runtime metadata and outputs, including any legacy hidden-test details stored by older submissions.
 - Platform health status reports whether a Judge0 URL is configured; it does not claim that the external service is reachable.
 
 ## Phase 6: ML classifier
 - Added a scikit-learn-backed error classifier in `backend/app/core/ml_classifier.py`.
-- It trains on common debugging labels when dependencies are available and gracefully falls back to heuristics otherwise.
-- This keeps the project safe and testable without fabricating accuracy claims.
+- The in-code examples and heuristic fallback are not a validated, attributable training dataset. No production accuracy or held-out evaluation is claimed; real-data training/evaluation remains incomplete.
 
 ## Phase 7: AI Mentor
 - Frontend Mentor requests are sent with the Supabase access token to `POST /api/v1/platform/mentor`; the hard-coded sample transcript and timeout-based reply simulation have been removed.
@@ -173,7 +178,7 @@ The new RLS hardening migration remains pending.
 - Socratic and conceptual modes, bounded conversation history, and persisted `learning_dna_profiles` context are sent to the provider.
 - Missing configuration returns HTTP 503; provider failures return an explicit HTTP error. The endpoint does not substitute generated local text.
 - Automated tests cover provider request construction, provider failures, missing configuration, and persisted Learning DNA context.
-- Current verification: full backend suite passes (74 tests; two deprecation warnings); frontend TypeScript check and production build succeed.
+- Current verification: full backend suite passes (80 tests; two deprecation warnings); frontend lint, TypeScript check, and production build succeed.
 - Live provider verification is still pending until real backend credentials are supplied and a request succeeds.
 
 ## Phase 8: Learning DNA
@@ -181,24 +186,26 @@ The new RLS hardening migration remains pending.
 - Missing database configuration returns HTTP 503; no-submission users receive an explicit empty profile with no invented metrics.
 - The Learning DNA page calls the authenticated API and renders loading, error, empty, and data states; its mock profile and simulated refresh were removed.
 - Exact submission verdicts are stored in `runtime_metadata`; the database `status` column uses allowed `passed`, `failed`, and `error` values.
-- Full backend suite: 74 passed; frontend TypeScript check and production build passed. Live Supabase verification remains pending.
+- Full backend suite: 80 passed; frontend lint, TypeScript check, and production build passed. Live Supabase verification remains pending.
 
 ## Phase 9: Dashboards
 - The admin dashboard reads exact profile, published problem/course, and submission counts from Supabase through an admin-only endpoint; provider labels reflect configuration, not service health.
-- The former teacher summary endpoint returns an explicit unavailable response rather than simulated metrics. Teacher analytics remain blocked until course-scoped data and tests exist.
-- Student and teacher dashboards and daily-plan pages still contain mock data.
+- The student dashboard reads persisted Learning DNA, submissions, and daily plans through authenticated APIs; adaptive selection is explicitly not implemented.
+- The submission history page reads only the signed-in user's safe summary fields and public problem metadata; source code and test outputs are not displayed.
+- Daily plans load persisted tasks and save completion changes through an owner-scoped endpoint.
+- The teacher dashboard reads only courses owned by the signed-in teacher and exact active-enrollment counts; student-level analytics and hint delivery remain unimplemented.
 - Frontend route structure remains intact and UI design is preserved.
 
 ## Phase 10: Deployment preparation
-- Validation: 74 backend tests passed; frontend TypeScript check/build passed; SQL parser accepted 15 statements in the new migration; `git diff --check` passed.
+- Validation: 80 backend tests passed; frontend lint, TypeScript check, and production build passed; `git diff --check` passed before final documentation changes.
 - Added GitHub Actions checks for backend tests, frontend lint/type/build checks, and migration-version uniqueness; the hosted workflow has not yet run.
-- `npm audit --omit=dev` still reports one critical Next.js advisory. The available fix requires upgrading from Next.js 14 to 16.4.6; this breaking framework change has not been made without approval. The full audit also reports 17 development-dependency findings.
-- No credentials or real `.env` files were detected in the current staged/unstaged changes; `.env.example` contains placeholders. A repository-wide historical secret scan was not performed.
+- Frontend is upgraded to Next.js 16.4.6 / React 19.3.1 with Node 22 in CI. `npm audit --omit=dev` reports zero production vulnerabilities. The full audit still reports 21 development dependency findings (3 moderate, 18 high); resolving them requires a breaking Tailwind upgrade, so no force fix was applied.
+- No local `.env` files were found; `.env.example` contains placeholders. A repository-wide historical secret scan was not performed.
 - Live external integrations remain gated behind environment configuration.
 
 ## Current constraints
 - No authenticated app-level Supabase, Judge0, or LLM provider verification was performed; Supabase catalog metadata was queried read-only.
-- Production dependency security is not clear: Next.js 14.2.35 remains flagged critical. The major upgrade needs review and regression validation before deployment.
+- The production dependency audit is clear; development-tool advisories remain and need a reviewed Tailwind/toolchain upgrade before treating the full dependency tree as clean.
 - Live services are implemented safely and documented as requiring actual configuration before runtime verification.
 - The system intentionally does not claim external service success without live credentials and successful checks.
 - Problem records, public samples, supported languages, and progressive hints now load through backend APIs. A live database is required for end-to-end verification.
@@ -210,8 +217,7 @@ The new RLS hardening migration remains pending.
 ## Next sustained work
 1. Review and test `20261121000100_scope_course_data_rls.sql` with isolated role accounts, then obtain explicit approval before applying it to production.
 2. Configure and smoke-test Judge0, then implement a shared rate limiter before public deployment.
-3. Complete database-backed teacher/admin problem CRUD, publication validation, and challenge analytics.
-4. Replace remaining student/teacher dashboard and daily-plan mock data with authorized API data.
-5. Persist mentor conversations/messages and add pgvector retrieval when configured.
-6. Validate ML with real attributable data and a reproducible evaluation.
-7. Add CI/CD and deployment pipeline documentation.
+3. Implement safe admin problem CRUD, publication validation, and challenge analytics; the current admin list is read-only and no longer simulates success.
+4. Persist mentor conversations/messages and add pgvector retrieval when configured.
+5. Validate ML with real attributable data and a reproducible evaluation.
+6. Configure deployment credentials privately and verify live Supabase, Judge0, and LLM integrations.

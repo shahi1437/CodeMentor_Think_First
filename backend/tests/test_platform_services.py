@@ -111,15 +111,124 @@ def test_admin_dashboard_returns_database_metrics_and_configuration(monkeypatch)
     }
 
 
-def test_teacher_dashboard_does_not_return_simulated_metrics():
+def test_teacher_dashboard_returns_only_owned_course_summaries(monkeypatch):
+    class FakeDatabase:
+        configured = True
+
+        def list_courses(self, teacher_id, limit):
+            assert (teacher_id, limit) == ("teacher-dashboard", 50)
+            return [{
+                "id": "course-1",
+                "teacher_id": teacher_id,
+                "title": "Algorithms",
+                "code": "ALG-1",
+                "description": "Class course",
+                "is_published": True,
+            }]
+
+        def count_active_course_enrollments(self, course_id):
+            assert course_id == "course-1"
+            return 3
+
+    monkeypatch.setattr(platform, "get_database_service", lambda: FakeDatabase())
     token = create_test_token("teacher-dashboard", "teacher@example.com", "teacher")
     response = client.get(
         "/api/v1/platform/dashboard-summary",
         headers={"Authorization": f"Bearer {token}"},
     )
 
-    assert response.status_code == 503
-    assert "course-scoped" in response.json()["detail"]
+    assert response.status_code == 200
+    assert response.json() == {
+        "courses": [{
+            "id": "course-1",
+            "title": "Algorithms",
+            "code": "ALG-1",
+            "description": "Class course",
+            "is_published": True,
+            "active_enrollment_count": 3,
+        }],
+    }
+
+
+def test_student_cannot_read_teacher_course_summary():
+    token = create_test_token("student-teacher-dashboard", "student@example.com", "student")
+    response = client.get(
+        "/api/v1/platform/dashboard-summary",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 403
+
+
+def test_daily_plans_include_only_the_current_users_tasks(monkeypatch):
+    class FakeDatabase:
+        def list_daily_plans(self, user_id, limit):
+            assert user_id == "daily-plan-owner"
+            assert limit == 20
+            return [{"id": "plan-1", "user_id": user_id, "plan_name": "Saved plan"}]
+
+        def list_daily_plan_tasks(self, plan_id):
+            assert plan_id == "plan-1"
+            return [{"id": "task-1", "title": "Practice", "completed": False}]
+
+    monkeypatch.setattr(platform, "get_database_service", lambda: FakeDatabase())
+    token = create_test_token("daily-plan-owner", "owner@example.com", "student")
+    response = client.get(
+        "/api/v1/platform/daily-plans",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == [{
+        "id": "plan-1",
+        "user_id": "daily-plan-owner",
+        "plan_name": "Saved plan",
+        "tasks": [{"id": "task-1", "title": "Practice", "completed": False}],
+    }]
+
+
+def test_daily_plan_task_update_requires_plan_ownership(monkeypatch):
+    class FakeDatabase:
+        def get_daily_plan(self, plan_id, user_id):
+            assert plan_id == "other-plan"
+            assert user_id == "daily-plan-outsider"
+            return None
+
+        def update_daily_plan_task(self, *_args):
+            raise AssertionError("A task must not be updated for an unowned plan.")
+
+    monkeypatch.setattr(platform, "get_database_service", lambda: FakeDatabase())
+    token = create_test_token("daily-plan-outsider", "outsider@example.com", "student")
+    response = client.patch(
+        "/api/v1/platform/daily-plans/other-plan/tasks/task-1",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"completed": True},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Daily plan not found."
+
+
+def test_daily_plan_task_update_persists_completed_state(monkeypatch):
+    class FakeDatabase:
+        def get_daily_plan(self, plan_id, user_id):
+            assert (plan_id, user_id) == ("plan-1", "daily-plan-owner")
+            return {"id": plan_id, "user_id": user_id}
+
+        def update_daily_plan_task(self, plan_id, task_id, completed):
+            assert (plan_id, task_id, completed) == ("plan-1", "task-1", True)
+            return {"id": task_id, "plan_id": plan_id, "completed": completed}
+
+    monkeypatch.setattr(platform, "get_database_service", lambda: FakeDatabase())
+    token = create_test_token("daily-plan-owner", "owner@example.com", "student")
+    response = client.patch(
+        "/api/v1/platform/daily-plans/plan-1/tasks/task-1",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"completed": True},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"id": "task-1", "plan_id": "plan-1", "completed": True}
 
 
 def test_ml_classifier_detects_name_error_pattern():

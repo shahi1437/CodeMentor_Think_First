@@ -96,3 +96,7 @@ class LearningDNAResponse(BaseModel):
     error_categories: Dict[str, int]
     activity_days: int
     has_data: bool
+
+
+class DailyPlanTaskUpdate(BaseModel):
+    completed: bool

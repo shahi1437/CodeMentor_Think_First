@@ -257,6 +257,51 @@ class DatabaseService:
         data = self._extract_data(response, [])
         return list(data) if isinstance(data, list) else []
 
+    def get_daily_plan(self, plan_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+        client = self._require_client()
+        response = (
+            client.table("daily_plans")
+            .select("id,user_id,status")
+            .eq("id", plan_id)
+            .eq("user_id", user_id)
+            .maybe_single()
+            .execute()
+        )
+        data = self._extract_data(response)
+        return data if isinstance(data, dict) else None
+
+    def list_daily_plan_tasks(self, plan_id: str) -> List[Dict[str, Any]]:
+        client = self._require_client()
+        response = (
+            client.table("daily_plan_tasks")
+            .select("id,plan_id,title,description,task_type,completed,created_at,updated_at")
+            .eq("plan_id", plan_id)
+            .order("created_at")
+            .execute()
+        )
+        data = self._extract_data(response, [])
+        return list(data) if isinstance(data, list) else []
+
+    def update_daily_plan_task(
+        self,
+        plan_id: str,
+        task_id: str,
+        completed: bool,
+    ) -> Optional[Dict[str, Any]]:
+        client = self._require_client()
+        response = (
+            client.table("daily_plan_tasks")
+            .update({"completed": completed})
+            .eq("id", task_id)
+            .eq("plan_id", plan_id)
+            .select("id,plan_id,completed")
+            .execute()
+        )
+        data = self._extract_data(response, [])
+        if isinstance(data, list) and data and isinstance(data[0], dict):
+            return dict(data[0])
+        return None
+
     def create_daily_plan_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         client = self._require_client()
         response = client.table("daily_plan_tasks").insert(payload).select("*").execute()
@@ -275,6 +320,20 @@ class DatabaseService:
         response = query.order("created_at", desc=True).limit(limit).execute()
         data = self._extract_data(response, [])
         return list(data) if isinstance(data, list) else []
+
+    def count_active_course_enrollments(self, course_id: str) -> int:
+        client = self._require_client()
+        response = (
+            client.table("course_enrollments")
+            .select("id", count="exact", head=True)
+            .eq("course_id", course_id)
+            .eq("enrollment_status", "active")
+            .execute()
+        )
+        count = getattr(response, "count", None)
+        if not isinstance(count, int):
+            raise RuntimeError("Supabase did not return an exact enrollment count.")
+        return count
 
     def create_course_enrollment(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         client = self._require_client()

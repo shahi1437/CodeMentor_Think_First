@@ -110,16 +110,11 @@ class FakeTable:
                 return type("Response", (), {"data": result})()
 
             if self.method == "update":
-                if self.filters:
-                    for row in self.rows:
-                        if row.get(self.filters[0][0]) == self.filters[0][1]:
-                            row.update(self.payload)
-                            result = [row]
-                            break
-                    else:
-                        result = []
-                else:
-                    result = []
+                result = []
+                for row in self.rows:
+                    if all(row.get(key) == value for key, value in self.filters):
+                        row.update(self.payload)
+                        result.append(self._project(row))
                 self.method = None
                 return type("Response", (), {"data": result})()
 
@@ -265,6 +260,20 @@ def test_admin_dashboard_metrics_use_exact_database_counts():
     }
 
 
+def test_teacher_course_enrollment_count_includes_only_active_rows():
+    client = FakeSupabaseClient({
+        "course_enrollments": [
+            {"id": "active-1", "course_id": "course-1", "enrollment_status": "active"},
+            {"id": "active-2", "course_id": "course-1", "enrollment_status": "active"},
+            {"id": "paused", "course_id": "course-1", "enrollment_status": "paused"},
+            {"id": "other-course", "course_id": "course-2", "enrollment_status": "active"},
+        ],
+    })
+    service = DatabaseService(client=client)
+
+    assert service.count_active_course_enrollments("course-1") == 2
+
+
 def test_problem_queries_do_not_select_hidden_test_cases():
     client = FakeSupabaseClient({
         "problems": [{
@@ -351,6 +360,22 @@ def test_database_service_reads_persisted_learning_dna_profile():
 
     assert profile["mastery"] == {"debugging": 61}
     assert profile["streak_days"] == 3
+
+
+def test_daily_plan_task_update_is_scoped_to_its_plan():
+    client = FakeSupabaseClient({
+        "daily_plan_tasks": [
+            {"id": "task-1", "plan_id": "plan-1", "completed": False},
+            {"id": "task-2", "plan_id": "plan-2", "completed": False},
+        ],
+    })
+    service = DatabaseService(client=client)
+
+    updated = service.update_daily_plan_task("plan-1", "task-1", True)
+
+    assert updated == {"id": "task-1", "plan_id": "plan-1", "completed": True}
+    assert client.table("daily_plan_tasks").rows[1]["completed"] is False
+    assert service.update_daily_plan_task("plan-2", "task-1", False) is None
 
 
 def test_database_service_requires_configuration(monkeypatch):

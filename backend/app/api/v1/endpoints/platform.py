@@ -19,6 +19,7 @@ from backend.app.schemas.auth import UserProfile, UserRole
 from backend.app.schemas.platform import (
     ErrorPredictionRequest,
     ErrorPredictionResponse,
+    DailyPlanTaskUpdate,
     ExecuteRequest,
     ExecuteResponse,
     LearningDNAResponse,
@@ -202,9 +203,33 @@ async def list_courses(current_user: UserProfile = Depends(require_student)):
 async def list_student_daily_plans(current_user: UserProfile = Depends(require_student)):
     database = get_database_service()
     try:
-        return database.list_daily_plans(current_user.id, limit=20)
+        plans = database.list_daily_plans(current_user.id, limit=20)
+        return [
+            {**plan, "tasks": database.list_daily_plan_tasks(str(plan["id"]))}
+            for plan in plans
+        ]
     except RuntimeError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+
+
+@router.patch("/daily-plans/{plan_id}/tasks/{task_id}")
+async def update_student_daily_plan_task(
+    plan_id: str,
+    task_id: str,
+    payload: DailyPlanTaskUpdate,
+    current_user: UserProfile = Depends(require_student),
+):
+    database = get_database_service()
+    try:
+        plan = database.get_daily_plan(plan_id, current_user.id)
+        if not plan:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Daily plan not found.")
+        task = database.update_daily_plan_task(plan_id, task_id, payload.completed)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    if not task:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found in this daily plan.")
+    return task
 
 
 @router.get("/submissions")
@@ -445,10 +470,28 @@ async def learning_dna(current_user: UserProfile = Depends(require_student)):
 
 @router.get("/dashboard-summary")
 async def dashboard_summary(current_user: UserProfile = Depends(require_teacher)):
-    raise HTTPException(
-        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-        detail="Teacher analytics require verified course-scoped student and submission data.",
-    )
+    database = get_database_service()
+    if not database.configured:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Teacher course summaries require a configured Supabase database.",
+        )
+    try:
+        courses = database.list_courses(teacher_id=current_user.id, limit=50)
+        summaries = [
+            {
+                "id": course["id"],
+                "title": course["title"],
+                "code": course.get("code"),
+                "description": course.get("description"),
+                "is_published": bool(course.get("is_published")),
+                "active_enrollment_count": database.count_active_course_enrollments(str(course["id"])),
+            }
+            for course in courses
+        ]
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    return {"courses": summaries}
 
 
 @router.get("/admin/dashboard-summary")

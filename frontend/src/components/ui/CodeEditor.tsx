@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import Editor from '@monaco-editor/react';
 import { Copy, RotateCcw, Check, Code } from 'lucide-react';
 
@@ -25,26 +25,20 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
   highlightLines = [],
   height = '420px',
 }) => {
-  const [code, setCode] = useState(initialCode);
+  const [uncontrolledCode, setUncontrolledCode] = useState(initialCode);
   const [copied, setCopied] = useState(false);
-  const [selectedLang, setSelectedLang] = useState<'python' | 'javascript' | 'cpp'>(language);
-
-  useEffect(() => {
-    setCode(initialCode);
-  }, [initialCode]);
-
-  useEffect(() => {
-    setSelectedLang(language);
-  }, [language]);
+  const [uncontrolledLang, setUncontrolledLang] = useState<'python' | 'javascript' | 'cpp'>(language);
+  const code = onCodeChange ? initialCode : uncontrolledCode;
+  const selectedLang = onLanguageChange ? language : uncontrolledLang;
 
   const handleEditorChange = (value?: string) => {
     const nextCode = value ?? '';
-    setCode(nextCode);
+    if (!onCodeChange) setUncontrolledCode(nextCode);
     onCodeChange?.(nextCode);
   };
 
   const handleLanguageChange = (nextLanguage: 'python' | 'javascript' | 'cpp') => {
-    setSelectedLang(nextLanguage);
+    if (!onLanguageChange) setUncontrolledLang(nextLanguage);
     onLanguageChange?.(nextLanguage);
   };
 
@@ -59,7 +53,7 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
   };
 
   const handleReset = () => {
-    setCode(initialCode);
+    if (!onCodeChange) setUncontrolledCode(initialCode);
     onCodeChange?.(initialCode);
   };
 

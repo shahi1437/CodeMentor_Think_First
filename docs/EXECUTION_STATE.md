@@ -2,10 +2,10 @@
 
 ## Current checkpoint
 
-- Branch: `main`
-- Base commit for the current milestone: `c5a8cdad781153077a2f80c7d3d2f14d3789a447`.
-- The milestone is committed and pushed; continue from current branch history.
-- Latest complete validation: backend 74 passed (two deprecation warnings); frontend TypeScript check and production build passed.
+- Branch: `feature/complete-production-launch`
+- Base commit: `dd67f0b` (merged PR #7, based on `origin/main`).
+- Current milestone changes are uncommitted and have not been pushed; review before delivery.
+- Latest complete validation: backend 80 passed (two deprecation warnings); frontend lint, TypeScript check, and production build passed.
 - No authenticated app-level Supabase, Judge0, or LLM request was verified.
 
 ## Supabase production audit checkpoint (2026-11-18)
@@ -31,14 +31,19 @@
   plus explicit approval before production deployment.
 - Added `.github/workflows/ci.yml` for backend tests, frontend lint/type/build
   checks, and unique migration versions. Hosted CI verification is pending.
-- Replaced fabricated administrator metrics and action toasts with an
-  admin-only API backed by exact Supabase counts and configuration labels.
-  The former teacher summary endpoint now returns an explicit unavailable
-  response rather than simulated analytics.
-- Configured ESLint and CI, fixed the reported JSX escaping errors, and applied
-  compatible DOMPurify/PostCSS overrides. The production dependency audit still
-  reports a critical Next.js 14 advisory; the available fix is a major Next.js
-  16 upgrade and is awaiting review/approval.
+- Latest read-only migration listing shows the five baseline versions recorded
+  remotely and `20261121000100` pending. No production migration or SQL change
+  was made in this milestone.
+- Student dashboard and daily-plan pages now use authenticated persisted data;
+  daily-task completion is owner-scoped and saved through the backend.
+- Submission history uses the authenticated safe-summary endpoint and public
+  problem metadata; it no longer renders seeded mock submissions or test output.
+- Teacher dashboard now shows teacher-owned course metadata and exact active
+  enrollment counts, without claiming student analytics or hint delivery.
+- Frontend was upgraded to Next.js 16.4.6 / React 19.3.1 and CI Node 22.
+  Production audit reports zero vulnerabilities; full audit still reports 21
+  development dependency findings, mostly requiring a reviewed Tailwind major
+  upgrade.
 - Teachers are intentionally not granted direct submission reads: the schema
   has no problem-to-course assignment relation, so active enrollment alone
   cannot prove an individual submission belongs to a teacher's course.
@@ -47,7 +52,7 @@
   these against course enrollment before claiming full authorization.
 - This is not a backend connection test: `.env` files are absent and no real
   service-role/JWT configuration was loaded. The backend test suite passed
-  locally (74 tests); no remote test records were created.
+  locally (80 tests); no remote test records were created.
 
 ## Latest milestone
 
@@ -69,10 +74,9 @@
 
 ## Remaining verified gaps
 
-- Complete database-backed teacher/admin problem CRUD, publication validation, and adaptive challenge selection.
+- Complete safe database-backed admin problem authoring/publication and adaptive challenge selection.
 - Add shared execution rate limiting before public exposure.
 - Persist mentor conversations and messages; implement pgvector retrieval only when configured.
-- Replace remaining student/teacher dashboard and daily-plan mock data.
 - Validate ML with real attributable data and a reproducible evaluation.
 - Perform live Supabase, Judge0, and LLM verification when credentials are available.
 - Test the new RLS migration against isolated role accounts; deploy only after
@@ -80,8 +84,9 @@
 
 ## Next command/action
 
-The prior milestone is committed and pushed. The current Supabase audit and RLS changes are in the worktree and are not yet committed or pushed. Live app-level Supabase/Judge0/LLM verification still awaits private configuration.
+The current changes are uncommitted on `feature/complete-production-launch`. Live app-level Supabase/Judge0/LLM verification still awaits private configuration.
 
 No authenticated app-level Supabase, Judge0, or LLM integration verification
 has occurred. Read-only Supabase catalog queries did succeed. Do not commit or
-push this partial platform milestone as full-platform completion.
+describe this partial milestone as full-platform completion; production RLS
+hardening and live-service checks remain outstanding.
