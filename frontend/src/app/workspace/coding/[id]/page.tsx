@@ -37,7 +37,9 @@ export default function NormalCodingWorkspace() {
     message?: string;
     runtimeMs?: number;
     memoryMb?: number;
-    testResults?: { id: string; passed: boolean; output: string; expected: string }[];
+    mode?: 'run' | 'submit';
+    passedTestCount?: number;
+    totalTestCount?: number;
   }>({ status: 'idle' });
 
   const runPlatformRequest = async (endpoint: 'execute' | 'submit', payload: Record<string, unknown>) => {
@@ -55,7 +57,8 @@ export default function NormalCodingWorkspace() {
       throw new Error('A valid user session is required to run code in the backend sandbox.');
     }
 
-    const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+    const backendUrl =
+      process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
     const response = await fetch(`${backendUrl}/api/v1/platform/${endpoint}`, {
       method: 'POST',
       headers: {
@@ -84,10 +87,13 @@ export default function NormalCodingWorkspace() {
         stdin: problem.sampleTestCases[activeTestCaseTab]?.input ?? '',
       };
       const result = await runPlatformRequest('execute', payload);
+      const actualOutput = String(result.stdout || '').trim();
+      const expectedOutput = String(problem.sampleTestCases[activeTestCaseTab]?.expectedOutput || '').trim();
+      const matchedSample = result.status === 'accepted' && actualOutput === expectedOutput;
       const normalizedStatus =
-        result.status === 'accepted'
+        matchedSample
           ? 'accepted'
-          : result.status === 'wrong_answer'
+          : result.status === 'accepted' || result.status === 'wrong_answer'
             ? 'wrong_answer'
             : result.status === 'compilation_error'
               ? 'compilation_error'
@@ -99,24 +105,19 @@ export default function NormalCodingWorkspace() {
                     ? 'memory_limit_exceeded'
                     : result.status === 'validation_error'
                       ? 'validation_error'
-                      : result.status === 'unconfigured'
+                      : result.status === 'unconfigured' || result.status === 'configuration_error'
                         ? 'configuration_error'
                         : 'error';
 
       setExecutionResult({
         status: normalizedStatus,
+        mode: 'run',
         stdout: result.stdout || '',
         stderr: result.stderr || '',
         compileOutput: result.compile_output || '',
         message: result.message || 'Execution finished.',
         runtimeMs: result.execution_time_ms ?? undefined,
         memoryMb: result.memory_kb ? result.memory_kb / 1024 : undefined,
-        testResults: problem.sampleTestCases.map((tc) => ({
-          id: tc.id,
-          passed: result.status === 'accepted' && (result.stdout || '').trim() === (tc.expectedOutput || '').trim(),
-          output: String(result.stdout || '').trim(),
-          expected: tc.expectedOutput,
-        })),
       });
     } catch (error) {
       setExecutionResult({
@@ -137,12 +138,6 @@ export default function NormalCodingWorkspace() {
         problem_id: problem.id,
         language,
         source_code: code,
-        stdin: problem.sampleTestCases[0]?.input ?? '',
-        test_cases: problem.sampleTestCases.map((tc) => ({
-          input: tc.input,
-          expected_output: tc.expectedOutput,
-          is_hidden: false,
-        })),
         mode: 'submit',
       });
 
@@ -161,27 +156,24 @@ export default function NormalCodingWorkspace() {
                     ? 'memory_limit_exceeded'
                     : result.status === 'validation_error'
                       ? 'validation_error'
-                      : result.status === 'unconfigured'
+                      : result.status === 'unconfigured' || result.status === 'configuration_error'
                         ? 'configuration_error'
                         : 'error';
 
       setExecutionResult({
         status: normalizedStatus,
-        stdout: result.stdout || '',
-        stderr: result.stderr || '',
+        mode: 'submit',
+        stdout: '',
+        stderr: '',
         message: result.message || 'Submission processed.',
         runtimeMs: result.execution_time_ms ?? undefined,
         memoryMb: result.memory_kb ? result.memory_kb / 1024 : undefined,
-        testResults: problem.sampleTestCases.map((tc) => ({
-          id: tc.id,
-          passed: result.passed_test_count > 0,
-          output: String(result.stdout || '').trim(),
-          expected: tc.expectedOutput,
-        })),
+        passedTestCount: result.passed_test_count,
+        totalTestCount: result.total_test_count,
       });
     } catch (error) {
       setExecutionResult({
-        status: 'configuration_error',
+        status: 'error',
         message: error instanceof Error ? error.message : 'Unable to submit the solution.',
       });
     } finally {
@@ -385,8 +377,17 @@ export default function NormalCodingWorkspace() {
                   <div className="space-y-3">
                     <div className="flex items-center gap-2 text-emerald-400 font-bold">
                       <CheckCircle2 className="h-4 w-4" />
-                      <span>All Sample Tests Passed!</span>
+                      <span>
+                        {executionResult.mode === 'submit'
+                          ? `All ${executionResult.totalTestCount ?? 0} configured tests passed!`
+                          : 'Sample output matches the expected result.'}
+                      </span>
                     </div>
+                    {executionResult.mode === 'submit' ? (
+                      <p className="text-[11px] text-slate-300">
+                        Passed {executionResult.passedTestCount ?? 0} of {executionResult.totalTestCount ?? 0} configured tests.
+                      </p>
+                    ) : (
                     <div className="rounded-xl border border-slate-800 bg-navy-950 p-3 space-y-1.5 text-[11px]">
                       <div className="text-slate-400">
                         <span className="text-slate-500">Input: </span>
@@ -394,9 +395,10 @@ export default function NormalCodingWorkspace() {
                       </div>
                       <div className="text-emerald-400">
                         <span className="text-slate-500">Your Output: </span>
-                        {executionResult.stdout || problem.sampleTestCases[activeTestCaseTab]?.expectedOutput}
+                        {executionResult.stdout || '(no output)'}
                       </div>
                     </div>
+                    )}
                     {executionResult.message && <div className="text-slate-300">{executionResult.message}</div>}
                   </div>
                 ) : executionResult.status === 'configuration_error' ? (

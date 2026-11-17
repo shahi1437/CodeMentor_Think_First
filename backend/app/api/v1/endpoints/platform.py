@@ -4,8 +4,13 @@ from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from backend.app.core.ai_mentor import generate_mentor_response
-from backend.app.core.database import get_database_service
+from backend.app.core.ai_mentor import (
+    MentorConfigurationError,
+    MentorProviderError,
+    generate_mentor_response,
+)
+from backend.app.core.database import PUBLIC_PROBLEM_FIELDS, get_database_service
+from backend.app.core.config import settings
 from backend.app.core.judge0 import execute_code
 from backend.app.core.learning_dna import summarize_learning_dna
 from backend.app.core.ml_classifier import ErrorClassifier
@@ -21,9 +26,36 @@ from backend.app.schemas.platform import (
     MentorResponse,
     SubmissionRequest,
     SubmissionResponse,
+    TestCaseInput,
 )
 
 router = APIRouter(prefix="/platform", tags=["Platform services"])
+MAX_GRADING_TEST_CASES = 100
+STUDENT_SUBMISSION_FIELDS = frozenset({
+    "id",
+    "user_id",
+    "problem_id",
+    "status",
+    "score",
+    "language",
+    "created_at",
+})
+
+
+def _submission_database_status(verdict: str) -> str:
+    if verdict == "accepted":
+        return "passed"
+    if verdict in {
+        "compilation_error",
+        "runtime_error",
+        "time_limit_exceeded",
+        "memory_limit_exceeded",
+        "validation_error",
+        "configuration_error",
+        "error",
+    }:
+        return "error"
+    return "failed"
 
 
 @router.get("/status")
@@ -34,9 +66,8 @@ async def platform_status(current_user: UserProfile = Depends(get_current_user))
         "user": current_user.email,
         "role": current_user.role.value,
         "database": "configured" if database.configured else "missing_config",
-        "judge0": "configured" if bool(current_user.id) else "ready",
+        "judge0": "configured" if settings.JUDGE0_API_URL else "missing_config",
     }
-
 
 @router.get("/profiles")
 async def list_profiles(current_user: UserProfile = Depends(get_current_user)):
@@ -71,7 +102,10 @@ async def list_problem_records(current_user: UserProfile = Depends(require_stude
         problems = database.list_problems(limit=50, include_hidden=current_user.role in {UserRole.TEACHER, UserRole.ADMIN})
     except RuntimeError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
-    return problems
+    return [
+        {key: value for key, value in problem.items() if key in PUBLIC_PROBLEM_FIELDS}
+        for problem in problems
+    ]
 
 
 @router.get("/problems/{problem_id}")
@@ -85,7 +119,7 @@ async def get_problem_record(problem_id: str, current_user: UserProfile = Depend
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Problem not found.")
     if problem.get("is_published") is False and current_user.role == UserRole.STUDENT:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Hidden problems are not available to students.")
-    return problem
+    return {key: value for key, value in problem.items() if key in PUBLIC_PROBLEM_FIELDS}
 
 
 @router.get("/courses")
@@ -115,7 +149,12 @@ async def list_submissions(current_user: UserProfile = Depends(require_student))
     database = get_database_service()
     try:
         if current_user.role == UserRole.STUDENT:
-            return database.list_submissions(user_id=current_user.id, limit=20)
+            submissions = database.list_submissions(user_id=current_user.id, limit=20)
+            return [
+                {key: value for key, value in submission.items() if key in STUDENT_SUBMISSION_FIELDS}
+                for submission in submissions
+                if submission.get("user_id") == current_user.id
+            ]
         return database.list_submissions(limit=20)
     except RuntimeError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
@@ -141,50 +180,93 @@ async def execute_platform_code(payload: ExecuteRequest, current_user: UserProfi
 @router.post("/submit", response_model=SubmissionResponse)
 async def submit_code(payload: SubmissionRequest, current_user: UserProfile = Depends(require_student)):
     database = get_database_service()
-    problem = database.get_problem(payload.problem_id) if payload.problem_id else None
+    try:
+        problem = database.get_problem(payload.problem_id) if payload.problem_id else None
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     if payload.problem_id and not problem:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Problem not found.")
     if problem and problem.get("is_published") is False and current_user.role == UserRole.STUDENT:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Hidden problems are not available to students.")
 
     if current_user.role == UserRole.STUDENT and any(test_case.is_hidden for test_case in payload.test_cases):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Hidden tests are never exposed or processed for students.")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Hidden tests are never accepted from clients.")
+    try:
+        stored_cases = database.list_problem_test_cases(
+            payload.problem_id,
+            limit=MAX_GRADING_TEST_CASES + 1,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    if not stored_cases:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This problem does not have configured test cases and cannot be submitted yet.",
+        )
+    if len(stored_cases) > MAX_GRADING_TEST_CASES:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"This problem exceeds the {MAX_GRADING_TEST_CASES}-case grading limit.",
+        )
 
-    public_cases = list(payload.test_cases) or [{"input": payload.stdin, "expected_output": "", "is_hidden": False}]
+    grading_cases = [
+        TestCaseInput(
+            input=test_case.get("input_text") or "",
+            expected_output=test_case.get("expected_output") or "",
+            is_hidden=bool(test_case.get("is_hidden")),
+        )
+        for test_case in stored_cases
+    ]
     results = []
     passed_cases = 0
-    total_cases = len(public_cases)
+    total_cases = len(grading_cases)
 
-    for test_case in public_cases:
+    for test_case in grading_cases:
         execution = await execute_code(payload.language, payload.source_code, test_case.input)
         actual_output = (execution.get("stdout") or "").strip()
         expected_output = str(test_case.expected_output or "").strip()
         is_accepted = execution.get("status") == "accepted" and actual_output == expected_output
         if is_accepted:
             passed_cases += 1
-        results.append({
-            "input": test_case.input,
-            "expected_output": expected_output,
-            "actual_output": actual_output,
-            "status": execution.get("status", "error"),
-        })
+        results.append({"status": execution.get("status", "error")})
 
     verdict = "accepted" if total_cases and passed_cases == total_cases else "wrong_answer"
     if not total_cases:
         verdict = "invalid_submission"
-    if any(result["status"] in {"compilation_error", "runtime_error", "time_limit_exceeded", "memory_limit_exceeded", "validation_error"} for result in results):
-        verdict = result["status"] if result["status"] in {"compilation_error", "runtime_error", "time_limit_exceeded", "memory_limit_exceeded", "validation_error"} else verdict
+    execution_error = next(
+        (
+            result["status"]
+            for result in results
+            if result["status"] in {
+                "compilation_error",
+                "runtime_error",
+                "time_limit_exceeded",
+                "memory_limit_exceeded",
+                "validation_error",
+                "unconfigured",
+                "error",
+            }
+        ),
+        None,
+    )
+    if execution_error:
+        verdict = "configuration_error" if execution_error == "unconfigured" else execution_error
 
     submission_record = {
         "user_id": current_user.id,
         "problem_id": payload.problem_id,
-        "status": verdict,
+        "status": _submission_database_status(verdict),
         "score": round((passed_cases / total_cases) * 100, 2) if total_cases else 0.0,
         "language": payload.language,
         "source_code": payload.source_code,
-        "stdout": "\n".join(result["actual_output"] for result in results)[:2000],
-        "stderr": "\n".join(result["status"] for result in results)[:2000],
-        "runtime_metadata": {"passed_test_count": passed_cases, "total_test_count": total_cases, "results": results},
+        "stdout": "",
+        "stderr": "",
+        "runtime_metadata": {
+            "verdict": verdict,
+            "passed_test_count": passed_cases,
+            "total_test_count": total_cases,
+            "results": results,
+        },
     }
 
     try:
@@ -199,10 +281,16 @@ async def submit_code(payload: SubmissionRequest, current_user: UserProfile = De
         passed_test_count=passed_cases,
         total_test_count=total_cases,
         score=float(submission_record["score"]),
-        message="Submission processed successfully." if verdict == "accepted" else "Submission did not pass all public checks.",
+        message=(
+            "All configured problem tests passed."
+            if verdict == "accepted"
+            else "The execution service is not configured."
+            if verdict == "configuration_error"
+            else "Submission did not pass all configured problem tests."
+        ),
         status=verdict,
-        stdout=submission_record["stdout"],
-        stderr=submission_record["stderr"],
+        stdout="",
+        stderr="",
     )
 
 
@@ -219,23 +307,62 @@ async def classify_error(payload: ErrorPredictionRequest, current_user: UserProf
 
 @router.post("/mentor", response_model=MentorResponse)
 async def mentor_chat(payload: MentorRequest, current_user: UserProfile = Depends(require_student)):
-    response = await generate_mentor_response(payload.question, payload.topic, payload.student_context)
+    database = get_database_service()
+    learning_context = payload.student_context
+    if database.configured:
+        learning_dna = database.get_learning_dna_profile(current_user.id)
+        if learning_dna:
+            learning_context = (
+                f"Persisted Learning DNA: mastery={learning_dna.get('mastery', {})}; "
+                f"streak_days={learning_dna.get('streak_days', 0)}; "
+                f"consistency={learning_dna.get('consistency', 0)}."
+            )
+
+    try:
+        response = await generate_mentor_response(
+            payload.question,
+            payload.topic,
+            learning_context,
+            payload.mode,
+            [message.model_dump() for message in payload.history],
+        )
+    except MentorConfigurationError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    except MentorProviderError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
     return MentorResponse(
-        answer=str(response.get("answer", "No guidance available.")),
-        source=str(response.get("source", "local_guidance")),
-        safe_mode=bool(response.get("safe_mode", True)),
+        answer=str(response["answer"]),
+        source=str(response["source"]),
+        safe_mode=bool(response["safe_mode"]),
     )
 
 
 @router.get("/learning-dna", response_model=LearningDNAResponse)
 async def learning_dna(current_user: UserProfile = Depends(require_student)):
-    summary = summarize_learning_dna(current_user.id)
+    database = get_database_service()
+    if not database.configured:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Learning DNA requires a configured Supabase database.",
+        )
+    try:
+        submissions = database.list_learning_submissions(current_user.id, limit=500)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    summary = summarize_learning_dna(current_user.id, submissions)
     return LearningDNAResponse(
         user_id=summary["user_id"],
         mastery=summary["mastery"],
         streak_days=summary["streak_days"],
         consistency=summary["consistency"],
         daily_plan=summary["daily_plan"],
+        submission_count=summary["submission_count"],
+        accepted_submission_count=summary["accepted_submission_count"],
+        problems_solved=summary["problems_solved"],
+        error_categories=summary["error_categories"],
+        activity_days=summary["activity_days"],
+        has_data=summary["has_data"],
     )
 
 

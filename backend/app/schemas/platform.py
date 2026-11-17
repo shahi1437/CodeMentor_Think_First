@@ -64,10 +64,17 @@ class ErrorPredictionResponse(BaseModel):
     message: str
 
 
+class MentorMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(..., min_length=1, max_length=4000)
+
+
 class MentorRequest(BaseModel):
-    question: str = Field(..., min_length=1)
-    topic: str = "debugging"
-    student_context: str = ""
+    question: str = Field(..., min_length=1, max_length=4000)
+    topic: str = Field(default="debugging", max_length=100)
+    student_context: str = Field(default="", max_length=3000)
+    mode: Literal["socratic", "conceptual"] = "socratic"
+    history: List[MentorMessage] = Field(default_factory=list, max_length=12)
 
 
 class MentorResponse(BaseModel):
@@ -82,3 +89,9 @@ class LearningDNAResponse(BaseModel):
     streak_days: int
     consistency: float
     daily_plan: List[str]
+    submission_count: int
+    accepted_submission_count: int
+    problems_solved: int
+    error_categories: Dict[str, int]
+    activity_days: int
+    has_data: bool

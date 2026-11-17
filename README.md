@@ -38,12 +38,37 @@ Important:
 - Keep service-role access backend-only.
 - Do not trust client-supplied roles; always validate them on the server.
 
+## Configure the AI Mentor
+
+The Mentor sends requests from the authenticated frontend to the FastAPI endpoint at
+`/api/v1/platform/mentor`. The backend then calls an OpenAI-compatible chat-completions
+provider; its API key is never sent to the browser.
+
+In the backend `.env`, configure:
+
+- `LLM_API_URL`: the provider's chat-completions URL (the example uses OpenAI).
+- `LLM_API_KEY`: a private provider key. Keep it only in the backend environment.
+- `LLM_MODEL`: a model name supported by that provider.
+
+When following the local setup commands (which start FastAPI from `backend/`), put
+these values in `backend/.env`; the root `.env.example` is a template you can copy
+from. Do not put `LLM_API_KEY` in `frontend/.env.local` or in any `NEXT_PUBLIC_*`
+variable.
+
+Restart FastAPI after setting these values. If provider configuration is missing, the
+Mentor returns an explicit service-unavailable error; provider errors are also shown
+to the user rather than replaced with simulated answers. When a persisted
+`learning_dna_profiles` row exists for the signed-in user, its mastery and activity
+summary is supplied to the provider as context. Without that row, no fabricated
+Learning DNA values are used.
+
 ## Database security notes
 
 - The database uses Supabase Row Level Security (RLS).
 - Students can only read their own data and public problem content.
 - Teachers and admins can access controlled course and management records.
-- Hidden test cases are never exposed to students through API-level queries.
+- Backend problem and submission-history APIs exclude hidden test data, including legacy submission outputs.
+- Apply `20261118_problem_hidden_column_security.sql` before allowing browser clients to query `problems` directly; live migration verification is still required.
 
 ## Validation
 
@@ -54,4 +79,4 @@ cd backend
 venv\Scripts\python.exe -m pytest tests -q
 ```
 
-The project intentionally uses safe fallbacks when live external credentials are missing and does not claim live service success without a verified configuration.
+External services are not represented as successful when configuration is missing. In particular, the AI Mentor requires backend LLM configuration and a successful provider response; configure real credentials to verify the live integration.

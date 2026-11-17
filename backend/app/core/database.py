@@ -7,6 +7,21 @@ from supabase import Client, create_client
 from backend.app.core.config import settings
 
 
+PUBLIC_PROBLEM_COLUMNS = (
+    "id",
+    "title",
+    "slug",
+    "difficulty",
+    "category",
+    "description",
+    "starter_code",
+    "is_published",
+    "created_at",
+    "updated_at",
+)
+PUBLIC_PROBLEM_FIELDS = frozenset(PUBLIC_PROBLEM_COLUMNS)
+
+
 class DatabaseService:
     """Supabase-backed persistence abstraction for profiles and platform data."""
 
@@ -73,16 +88,35 @@ class DatabaseService:
 
     def get_problem(self, problem_id: str) -> Optional[Dict[str, Any]]:
         client = self._require_client()
-        response = client.table("problems").select("*").eq("id", problem_id).maybe_single().execute()
+        response = (
+            client.table("problems")
+            .select(",".join(PUBLIC_PROBLEM_COLUMNS))
+            .eq("id", problem_id)
+            .maybe_single()
+            .execute()
+        )
         data = self._extract_data(response)
         return data if isinstance(data, dict) else None
 
     def list_problems(self, limit: int = 20, include_hidden: bool = False) -> List[Dict[str, Any]]:
         client = self._require_client()
-        query = client.table("problems").select("*")
+        query = client.table("problems").select(",".join(PUBLIC_PROBLEM_COLUMNS))
         if not include_hidden:
             query = query.eq("is_published", True)
         response = query.order("created_at", desc=True).limit(limit).execute()
+        data = self._extract_data(response, [])
+        return list(data) if isinstance(data, list) else []
+
+    def list_problem_test_cases(self, problem_id: str, limit: int = 101) -> List[Dict[str, Any]]:
+        client = self._require_client()
+        response = (
+            client.table("problem_test_cases")
+            .select("input_text,expected_output,is_hidden")
+            .eq("problem_id", problem_id)
+            .order("created_at")
+            .limit(limit)
+            .execute()
+        )
         data = self._extract_data(response, [])
         return list(data) if isinstance(data, list) else []
 
@@ -111,6 +145,19 @@ class DatabaseService:
         data = self._extract_data(response, [])
         return list(data) if isinstance(data, list) else []
 
+    def list_learning_submissions(self, user_id: str, limit: int = 500) -> List[Dict[str, Any]]:
+        client = self._require_client()
+        response = (
+            client.table("submissions")
+            .select("problem_id,status,language,runtime_metadata,created_at")
+            .eq("user_id", user_id)
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        data = self._extract_data(response, [])
+        return list(data) if isinstance(data, list) else []
+
     def create_learning_dna_profile(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         client = self._require_client()
         response = client.table("learning_dna_profiles").upsert(payload, on_conflict="user_id").execute()
@@ -118,6 +165,18 @@ class DatabaseService:
         if isinstance(data, list) and data:
             return dict(data[0])
         return payload
+
+    def get_learning_dna_profile(self, user_id: str) -> Optional[Dict[str, Any]]:
+        client = self._require_client()
+        response = (
+            client.table("learning_dna_profiles")
+            .select("mastery, streak_days, consistency, last_activity_at")
+            .eq("user_id", user_id)
+            .maybe_single()
+            .execute()
+        )
+        data = self._extract_data(response)
+        return data if isinstance(data, dict) else None
 
     def create_learning_event(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         client = self._require_client()
