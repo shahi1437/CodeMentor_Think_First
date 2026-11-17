@@ -12,8 +12,10 @@
 
 ## Phase 3: Database architecture and APIs
 - Supabase migration for auth, profiles, and RLS exists under `supabase/migrations/20261117_init_auth_schema.sql`.
-- Added a safe database service abstraction in `backend/app/core/database.py` for profile reads and writes.
-- Added platform API endpoints for user profile access and secure platform operations.
+- Added a full additive platform schema migration at `supabase/migrations/20261118_platform_database_schema.sql` covering profiles, problems, test cases, submissions, learning DNA, daily plans, courses, enrollments, mentor data, knowledge chunks, and audit logs.
+- Added a real database service abstraction in `backend/app/core/database.py` with explicit configuration errors and repository-style CRUD wrappers for platform tables.
+- Added platform API support for profile access, problem retrieval, course visibility, and student daily plans using backend-side authorization checks.
+- Hidden test case privacy is enforced via the schema and API logic; students cannot read restricted case data.
 
 ## Phase 4: Code execution and Monaco-ready APIs
 - Added Judge0 service wrapper in `backend/app/core/judge0.py`.

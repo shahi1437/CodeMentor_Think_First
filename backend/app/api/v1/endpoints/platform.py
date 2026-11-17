@@ -36,15 +36,76 @@ async def platform_status(current_user: UserProfile = Depends(get_current_user))
     }
 
 
+@router.get("/profiles")
+async def list_profiles(current_user: UserProfile = Depends(get_current_user)):
+    database = get_database_service()
+    if current_user.role == UserRole.STUDENT:
+        return [database.get_user_profile(current_user.id)] if database.get_user_profile(current_user.id) else []
+    try:
+        profiles = database.list_profiles(limit=50)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    return profiles
+
+
 @router.get("/profile/{user_id}")
 async def get_profile(user_id: str, current_user: UserProfile = Depends(get_current_user)):
     if current_user.role == UserRole.STUDENT and current_user.id != user_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Students can only read their own profile.")
     database = get_database_service()
-    profile = database.get_user_profile(user_id)
+    try:
+        profile = database.get_user_profile(user_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     if not profile:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User profile not found.")
     return profile
+
+
+@router.get("/problems")
+async def list_problem_records(current_user: UserProfile = Depends(require_student)):
+    database = get_database_service()
+    try:
+        problems = database.list_problems(limit=50, include_hidden=current_user.role in {UserRole.TEACHER, UserRole.ADMIN})
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    return problems
+
+
+@router.get("/problems/{problem_id}")
+async def get_problem_record(problem_id: str, current_user: UserProfile = Depends(require_student)):
+    database = get_database_service()
+    try:
+        problem = database.get_problem(problem_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    if not problem:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Problem not found.")
+    if problem.get("is_published") is False and current_user.role == UserRole.STUDENT:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Hidden problems are not available to students.")
+    return problem
+
+
+@router.get("/courses")
+async def list_courses(current_user: UserProfile = Depends(require_student)):
+    database = get_database_service()
+    try:
+        if current_user.role == UserRole.STUDENT:
+            courses = [course for course in database.list_courses(limit=50) if course.get("is_published", True)]
+        else:
+            courses = database.list_courses(teacher_id=current_user.id, limit=50)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    return courses
+
+
+@router.get("/daily-plans")
+async def list_student_daily_plans(current_user: UserProfile = Depends(require_student)):
+    database = get_database_service()
+    try:
+        return database.list_daily_plans(current_user.id, limit=20)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 
 
 @router.post("/execute", response_model=ExecuteResponse)
