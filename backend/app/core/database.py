@@ -15,6 +15,9 @@ PUBLIC_PROBLEM_COLUMNS = (
     "category",
     "description",
     "starter_code",
+    "problem_mode",
+    "tags",
+    "supported_languages",
     "is_published",
     "created_at",
     "updated_at",
@@ -28,18 +31,21 @@ class DatabaseService:
     def __init__(self, client: Optional[Client] = None):
         self.configured = bool(settings.SUPABASE_URL and settings.SUPABASE_SERVICE_ROLE_KEY)
         self.client = client
+        self.configuration_error: Optional[str] = None
         if self.client is None and self.configured:
             try:
                 self.client = create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_ROLE_KEY)
-            except Exception:
+            except Exception as exc:
+                self.configuration_error = "Unable to initialize the Supabase database client."
                 self.configured = False
                 self.client = None
 
     def _require_client(self) -> Client:
         if not self.client:
             raise RuntimeError(
-                "Supabase PostgreSQL configuration is missing. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY "
-                "before using the database service."
+                self.configuration_error
+                or "Supabase PostgreSQL configuration is missing. Set SUPABASE_URL and "
+                "SUPABASE_SERVICE_ROLE_KEY before using the database service."
             )
         return self.client
 
@@ -49,6 +55,15 @@ class DatabaseService:
         if data is None:
             return default
         return data
+
+    @staticmethod
+    def _require_written_row(response: Any, resource: str) -> Dict[str, Any]:
+        data = getattr(response, "data", None)
+        if isinstance(data, dict):
+            return dict(data)
+        if isinstance(data, list) and data and isinstance(data[0], dict):
+            return dict(data[0])
+        raise RuntimeError(f"Supabase did not confirm the persisted {resource} record.")
 
     def get_user_profile(self, user_id: str) -> Optional[Dict[str, Any]]:
         client = self._require_client()
@@ -72,19 +87,13 @@ class DatabaseService:
             "preferred_language": profile.get("preferred_language", "python"),
             "is_active": profile.get("is_active", True),
         }
-        response = client.table("profiles").upsert(payload, on_conflict="id").execute()
-        data = self._extract_data(response, [payload])
-        if isinstance(data, list) and data:
-            return dict(data[0])
-        return payload
+        response = client.table("profiles").upsert(payload, on_conflict="id").select("*").execute()
+        return self._require_written_row(response, "profile")
 
     def create_problem(self, problem: Dict[str, Any]) -> Dict[str, Any]:
         client = self._require_client()
-        response = client.table("problems").insert(problem).execute()
-        data = self._extract_data(response, [problem])
-        if isinstance(data, list) and data:
-            return dict(data[0])
-        return problem
+        response = client.table("problems").insert(problem).select("*").execute()
+        return self._require_written_row(response, "problem")
 
     def get_problem(self, problem_id: str) -> Optional[Dict[str, Any]]:
         client = self._require_client()
@@ -120,21 +129,75 @@ class DatabaseService:
         data = self._extract_data(response, [])
         return list(data) if isinstance(data, list) else []
 
+    def list_public_problem_test_cases(self, problem_id: str, limit: int = 10) -> List[Dict[str, Any]]:
+        client = self._require_client()
+        response = (
+            client.table("problem_test_cases")
+            .select("id,name,input_text,expected_output")
+            .eq("problem_id", problem_id)
+            .eq("is_hidden", False)
+            .order("created_at")
+            .limit(limit)
+            .execute()
+        )
+        data = self._extract_data(response, [])
+        return list(data) if isinstance(data, list) else []
+
+    def list_problem_hints(self, problem_id: str) -> List[str]:
+        client = self._require_client()
+        response = (
+            client.table("problems")
+            .select("progressive_hints")
+            .eq("id", problem_id)
+            .maybe_single()
+            .execute()
+        )
+        data = self._extract_data(response)
+        if not isinstance(data, dict):
+            return []
+        hints = data.get("progressive_hints")
+        return [hint for hint in hints if isinstance(hint, str)] if isinstance(hints, list) else []
+
+    def list_problem_hint_progress(self, user_id: str, problem_id: str) -> List[int]:
+        client = self._require_client()
+        response = (
+            client.table("problem_hint_progress")
+            .select("tier")
+            .eq("user_id", user_id)
+            .eq("problem_id", problem_id)
+            .order("tier")
+            .limit(4)
+            .execute()
+        )
+        data = self._extract_data(response, [])
+        return [
+            int(row["tier"])
+            for row in data
+            if isinstance(row, dict) and isinstance(row.get("tier"), int)
+        ] if isinstance(data, list) else []
+
+    def record_problem_hint_tier(self, user_id: str, problem_id: str, tier: int) -> None:
+        client = self._require_client()
+        response = (
+            client.table("problem_hint_progress")
+            .upsert(
+                {"user_id": user_id, "problem_id": problem_id, "tier": tier},
+                on_conflict="user_id,problem_id,tier",
+            )
+            .select("user_id")
+            .execute()
+        )
+        self._require_written_row(response, "problem hint progress")
+
     def update_problem(self, problem_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
         client = self._require_client()
-        response = client.table("problems").update(updates).eq("id", problem_id).execute()
-        data = self._extract_data(response, [updates])
-        if isinstance(data, list) and data:
-            return dict(data[0])
-        return updates
+        response = client.table("problems").update(updates).eq("id", problem_id).select("*").execute()
+        return self._require_written_row(response, "problem")
 
     def create_submission(self, submission: Dict[str, Any]) -> Dict[str, Any]:
         client = self._require_client()
-        response = client.table("submissions").insert(submission).execute()
-        data = self._extract_data(response, [submission])
-        if isinstance(data, list) and data:
-            return dict(data[0])
-        return submission
+        response = client.table("submissions").insert(submission).select("*").execute()
+        return self._require_written_row(response, "submission")
 
     def list_submissions(self, user_id: Optional[str] = None, limit: int = 20) -> List[Dict[str, Any]]:
         client = self._require_client()
@@ -160,11 +223,11 @@ class DatabaseService:
 
     def create_learning_dna_profile(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         client = self._require_client()
-        response = client.table("learning_dna_profiles").upsert(payload, on_conflict="user_id").execute()
-        data = self._extract_data(response, [payload])
-        if isinstance(data, list) and data:
-            return dict(data[0])
-        return payload
+        response = client.table("learning_dna_profiles").upsert(
+            payload,
+            on_conflict="user_id",
+        ).select("*").execute()
+        return self._require_written_row(response, "Learning DNA profile")
 
     def get_learning_dna_profile(self, user_id: str) -> Optional[Dict[str, Any]]:
         client = self._require_client()
@@ -180,19 +243,13 @@ class DatabaseService:
 
     def create_learning_event(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         client = self._require_client()
-        response = client.table("learning_dna_events").insert(payload).execute()
-        data = self._extract_data(response, [payload])
-        if isinstance(data, list) and data:
-            return dict(data[0])
-        return payload
+        response = client.table("learning_dna_events").insert(payload).select("*").execute()
+        return self._require_written_row(response, "Learning DNA event")
 
     def create_daily_plan(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         client = self._require_client()
-        response = client.table("daily_plans").insert(payload).execute()
-        data = self._extract_data(response, [payload])
-        if isinstance(data, list) and data:
-            return dict(data[0])
-        return payload
+        response = client.table("daily_plans").insert(payload).select("*").execute()
+        return self._require_written_row(response, "daily plan")
 
     def list_daily_plans(self, user_id: str, limit: int = 20) -> List[Dict[str, Any]]:
         client = self._require_client()
@@ -202,19 +259,13 @@ class DatabaseService:
 
     def create_daily_plan_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         client = self._require_client()
-        response = client.table("daily_plan_tasks").insert(payload).execute()
-        data = self._extract_data(response, [payload])
-        if isinstance(data, list) and data:
-            return dict(data[0])
-        return payload
+        response = client.table("daily_plan_tasks").insert(payload).select("*").execute()
+        return self._require_written_row(response, "daily plan task")
 
     def create_course(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         client = self._require_client()
-        response = client.table("courses").insert(payload).execute()
-        data = self._extract_data(response, [payload])
-        if isinstance(data, list) and data:
-            return dict(data[0])
-        return payload
+        response = client.table("courses").insert(payload).select("*").execute()
+        return self._require_written_row(response, "course")
 
     def list_courses(self, teacher_id: Optional[str] = None, limit: int = 20) -> List[Dict[str, Any]]:
         client = self._require_client()
@@ -227,43 +278,33 @@ class DatabaseService:
 
     def create_course_enrollment(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         client = self._require_client()
-        response = client.table("course_enrollments").upsert(payload, on_conflict="course_id,student_id").execute()
-        data = self._extract_data(response, [payload])
-        if isinstance(data, list) and data:
-            return dict(data[0])
-        return payload
+        response = (
+            client.table("course_enrollments")
+            .upsert(payload, on_conflict="course_id,student_id")
+            .select("*")
+            .execute()
+        )
+        return self._require_written_row(response, "course enrollment")
 
     def create_mentor_conversation(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         client = self._require_client()
-        response = client.table("mentor_conversations").insert(payload).execute()
-        data = self._extract_data(response, [payload])
-        if isinstance(data, list) and data:
-            return dict(data[0])
-        return payload
+        response = client.table("mentor_conversations").insert(payload).select("*").execute()
+        return self._require_written_row(response, "mentor conversation")
 
     def create_mentor_message(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         client = self._require_client()
-        response = client.table("mentor_messages").insert(payload).execute()
-        data = self._extract_data(response, [payload])
-        if isinstance(data, list) and data:
-            return dict(data[0])
-        return payload
+        response = client.table("mentor_messages").insert(payload).select("*").execute()
+        return self._require_written_row(response, "mentor message")
 
     def create_knowledge_chunk(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         client = self._require_client()
-        response = client.table("knowledge_chunks").insert(payload).execute()
-        data = self._extract_data(response, [payload])
-        if isinstance(data, list) and data:
-            return dict(data[0])
-        return payload
+        response = client.table("knowledge_chunks").insert(payload).select("*").execute()
+        return self._require_written_row(response, "knowledge chunk")
 
     def create_audit_log(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         client = self._require_client()
-        response = client.table("audit_logs").insert(payload).execute()
-        data = self._extract_data(response, [payload])
-        if isinstance(data, list) and data:
-            return dict(data[0])
-        return payload
+        response = client.table("audit_logs").insert(payload).select("*").execute()
+        return self._require_written_row(response, "audit log")
 
 
 _database_service = DatabaseService()

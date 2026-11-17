@@ -13,6 +13,10 @@ Status definitions: **Implemented** means source exists; **Tested** means the re
 ## Database and submissions
 
 - [x] Additive migrations define the platform table set and RLS policies.
+- [x] Problem metadata migration adds mode, tags, configured languages, and server-controlled progressive hints.
+- [x] Backend public-sample query explicitly filters hidden cases.
+- [x] Progressive hints are served one tier per authenticated backend request.
+- [x] Hint-tier progression is persisted per student/problem and tier skips are rejected.
 - [x] Student problem reads omit hidden-test columns; an additive column-grant migration blocks direct client reads of legacy hidden JSON.
 - [x] Submission grading uses backend-loaded problem test cases and returns only safe verdict/count information.
 - [x] Database service exposes Supabase-backed operations.
@@ -25,11 +29,15 @@ Status definitions: **Implemented** means source exists; **Tested** means the re
 
 - [x] Monaco editor is integrated in the coding/debugging workspaces.
 - [x] Backend Judge0 request/polling wrapper and execution endpoints exist.
-- [ ] Workspaces still need a full audit for mock problem data and actual problem-bank loading.
+- [x] Problem Hub and coding/debugging workspaces load problem data and public samples through the backend API.
+- [x] Coding workspace renders persisted per-problem submission history instead of static sample history.
+- [x] Debugging verification uses the actual submission grader; no code-string acceptance shortcut remains.
 - [x] Isolated tests cover database-backed test execution and hidden data non-disclosure.
 - [ ] Validate submission workflow against real persisted data and live Judge0.
 - [ ] Live Judge0 run and submission verification.
-- [ ] Adaptive challenge selection, verified seeded challenge management, and persisted hints/attempt tracking.
+- [ ] Adaptive challenge selection, verified seeded challenge management, and time/attempt analytics.
+- [ ] Database-backed teacher/admin problem CRUD, publication validation, and complete challenge analytics.
+- [ ] Shared/distributed execution rate limiting.
 
 ## ML
 
@@ -56,10 +64,10 @@ Status definitions: **Implemented** means source exists; **Tested** means the re
 
 ## Quality and delivery
 
-- [x] Full backend suite passed after hidden-test changes: 40 passed, 1 Starlette/httpx deprecation warning.
-- [x] Frontend production build passed after hidden-test changes.
+- [x] Re-run the full backend suite after the latest problem-catalog tests and service changes: 70 passed, 2 deprecation warnings.
+- [x] Re-run the frontend production build after the latest workspace/filter changes.
 - [ ] Complete repository-wide historical secret and security review.
-- [x] Final backend tests, frontend build, and staged/unstaged whitespace checks passed.
+- [x] Final backend tests, frontend build, and staged/unstaged whitespace checks pass after the latest edits.
 - [x] Staged and unstaged diffs contain no detected real `.env` files or common credential/token patterns.
 - [x] Review the current staged and unstaged implementation diffs; live service checks remain pending configuration.
 - [ ] Review staged changes before commit; push only to the development branch after validation.

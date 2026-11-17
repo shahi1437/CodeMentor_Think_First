@@ -25,6 +25,8 @@ class FakeRoleRepository:
 
 
 def create_test_token(sub: str, email: str, role: str, expires_in: int = 3600) -> str:
+    if role_store.get_user_role(sub) is None:
+        role_store.set_user_role(sub, role)
     payload = {
         "sub": sub,
         "email": email,
@@ -110,6 +112,63 @@ async def test_database_role_is_authoritative_over_jwt_claim(monkeypatch):
     credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
     user = await get_current_user(credentials)
     assert user.role == UserRole.ADMIN
+
+
+@pytest.mark.asyncio
+async def test_jwt_role_claim_cannot_promote_persisted_student(monkeypatch):
+    fake_repo = FakeRoleRepository()
+    fake_repo.set_user_role("user-claim", UserRole.STUDENT)
+    monkeypatch.setattr(role_store, "_role_repository", fake_repo)
+
+    token = create_test_token("user-claim", "user@test.com", "admin")
+    credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+    user = await get_current_user(credentials)
+
+    assert user.role == UserRole.STUDENT
+
+
+def test_jwt_claim_cannot_authenticate_without_persisted_role():
+    token_payload = {
+        "sub": "unprovisioned-user",
+        "email": "user@test.com",
+        "app_metadata": {"role": "admin"},
+        "user_metadata": {"role": "admin"},
+        "exp": int(time.time()) + 3600,
+    }
+    token = jwt.encode(token_payload, settings.SUPABASE_JWT_SECRET, algorithm="HS256")
+
+    with pytest.raises(HTTPException) as exc:
+        decode_jwt_token(token)
+
+    assert exc.value.status_code == 403
+    assert "persisted profile role" in exc.value.detail
+
+
+def test_authentication_fails_closed_when_role_database_is_unavailable(monkeypatch):
+    monkeypatch.setattr(role_store, "_role_repository", role_store.NullRoleRepository())
+    token_payload = {
+        "sub": "unavailable-role-user",
+        "email": "user@test.com",
+        "app_metadata": {"role": "admin"},
+        "exp": int(time.time()) + 3600,
+    }
+    token = jwt.encode(token_payload, settings.SUPABASE_JWT_SECRET, algorithm="HS256")
+
+    with pytest.raises(HTTPException) as exc:
+        decode_jwt_token(token)
+
+    assert exc.value.status_code == 503
+    assert "could not be verified against Supabase" in exc.value.detail
+
+
+def test_authentication_fails_when_jwt_secret_is_unconfigured(monkeypatch):
+    monkeypatch.setattr(settings, "SUPABASE_JWT_SECRET", "")
+
+    with pytest.raises(HTTPException) as exc:
+        decode_jwt_token("not-a-token")
+
+    assert exc.value.status_code == 503
+    assert "JWT secret" in exc.value.detail
 
 
 @pytest.mark.asyncio

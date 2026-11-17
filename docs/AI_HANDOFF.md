@@ -4,9 +4,9 @@
 
 - Repository: `shahi1437/CodeMentor_Think_First`
 - Branch: `full-platform-completion`
-- HEAD: `60c8bd181438061eb48f4f07c90e481e1aec2d27`
-- The prior AI Mentor implementation is staged. Preserve it; do not reset, unstage, or overwrite it.
-- Latest full checks: backend `40 passed` (one Starlette/httpx deprecation warning); frontend production build passed.
+- Starting HEAD for the current uncommitted work: `c5a8cdad781153077a2f80c7d3d2f14d3789a447`.
+- Current source changes are unstaged/uncommitted; preserve them and do not reset or overwrite them.
+- Latest complete checks: backend `70 passed` (two deprecation warnings); frontend production build passed.
 - No live Supabase, Judge0, or LLM-provider request was verified.
 
 ## Current architecture snapshot
@@ -23,26 +23,26 @@
 3. Submission verdicts are normalized to the existing database constraint's `passed`, `failed`, and `error` values; the exact verdict remains in `runtime_metadata`. Judge0-not-configured is reported as `configuration_error`, not as a wrong answer.
 4. Hidden test protection now has API projection tests, an additive column-grant migration for `problems.hidden_test_cases`, and server-side submission grading from `problem_test_cases`. Apply the migration to Supabase before claiming live direct-client protection.
 5. Student submission history returns safe summary fields only; legacy runtime metadata and outputs are excluded to avoid exposing previously stored test data.
-6. Problem Hub and workspaces still need to load published problem records and public sample cases from the database instead of the current mock problem bank.
-7. Dashboard, problem, workspace, and daily-plan pages still use mock data/simulation banners; audit and replace them in bounded steps.
+6. Problem Hub and coding/debugging workspaces now use authenticated database-backed problem and public-sample APIs; debugging hints are returned one tier at a time and hint progression is stored per student/problem.
+7. Dashboard and daily-plan pages still contain mock data and require further API integration.
 8. The ML classifier has a small in-code example set and heuristics; no independently verified real dataset or model evaluation was found.
 9. `knowledge_chunks` and mentor tables exist, but no verified pgvector retrieval path was found during this audit.
 10. Service credentials and live Supabase/Judge0/LLM behavior remain unverified.
 
 ## Latest milestone and verification
 
-- Full backend test suite: 40 passed with one existing deprecation warning.
-- Hidden-case projection, database-owned grading, and non-disclosure tests passed; the new Supabase grants migration was not applied to a live project.
-- Frontend production build passed after the latest coding workspace changes.
+- Full backend test suite: 70 passed; frontend production build passed.
+- Backend tests cover hidden-case projection, database-owned grading, role verification, and tiered-hint privacy. The new migrations have not been applied to a live project.
+- Frontend production build passed before the final documentation and small UI refinements.
 - Submission status values were normalized to the existing database constraint; no status migration was needed.
 
 ## Next actions
 
-1. Apply and verify `supabase/migrations/20261118_problem_hidden_column_security.sql` on Supabase.
-2. Connect the Problem Hub and workspace pages to published database problems and public sample cases.
+1. Configure Supabase and Judge0 privately, apply migrations in order, and perform live integration checks.
+2. Implement database-backed admin problem CRUD, publication validation, adaptive selection, and a shared execution rate limiter.
 3. Persist mentor conversations/messages and add knowledge retrieval only when vector/provider configuration is available.
 4. Replace remaining mock dashboard and daily-plan data with authorized API data.
-5. Continue from `docs/IMPLEMENTATION_CHECKLIST.md`; preserve and review staged user work before any commit.
+5. Review and publish the locally validated changes without claiming live-service verification.
 
 ## Configuration and live verification
 

@@ -4,7 +4,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from backend.app.core.config import settings
-from backend.app.core.role_store import get_user_role
+from backend.app.core.role_store import InactiveAccountError, get_user_role
 from backend.app.schemas.auth import TokenPayload, UserProfile, UserRole
 
 # Bearer token extractor
@@ -16,11 +16,22 @@ def decode_jwt_token(token: str) -> TokenPayload:
     Decodes and verifies a Supabase JWT token.
     Supabase signs tokens with HS256 using the project's JWT Secret.
     """
+    jwt_secret = settings.SUPABASE_JWT_SECRET
+    if (
+        not jwt_secret
+        or len(jwt_secret.encode("utf-8")) < 32
+        or jwt_secret.strip().lower().startswith(("replace_with", "your_"))
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication is not configured with a valid Supabase JWT secret.",
+        )
+
     try:
         # Decode using the project's JWT secret
         payload = jwt.decode(
             token,
-            settings.SUPABASE_JWT_SECRET,
+            jwt_secret,
             algorithms=["HS256"],
             options={"verify_aud": False},  # Supabase aud is typically 'authenticated'
         )
@@ -33,9 +44,9 @@ def decode_jwt_token(token: str) -> TokenPayload:
     except jwt.PyJWTError as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Invalid authentication token: {str(e)}",
+            detail="Invalid authentication token.",
             headers={"WWW-Authenticate": "Bearer"},
-        )
+        ) from e
 
     # Extract user ID and role
     sub = payload.get("sub")
@@ -46,26 +57,35 @@ def decode_jwt_token(token: str) -> TokenPayload:
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    user_meta = payload.get("user_metadata", {}) or {}
-    app_meta = payload.get("app_metadata", {}) or {}
-
-    stored_role = get_user_role(sub)
-
-    # Resolve the authoritative role using the backend role registry first; fall back
-    # to token metadata when no persisted value exists.
-    raw_role = (
-        stored_role.value if stored_role is not None else None
-    ) or app_meta.get("role") or user_meta.get("role") or payload.get("role") or "student"
-
     try:
-        resolved_role = UserRole(raw_role)
-    except ValueError:
-        resolved_role = UserRole.STUDENT
+        stored_role = get_user_role(sub)
+    except InactiveAccountError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This account is inactive.",
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="The account role could not be verified against Supabase.",
+        ) from exc
+    if stored_role is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="The account has no persisted profile role.",
+        )
+
+    user_meta = payload.get("user_metadata")
+    if not isinstance(user_meta, dict):
+        user_meta = {}
+    app_meta = payload.get("app_metadata")
+    if not isinstance(app_meta, dict):
+        app_meta = {}
 
     return TokenPayload(
         sub=sub,
         email=payload.get("email") or user_meta.get("email"),
-        role=resolved_role,
+        role=stored_role,
         app_metadata=app_meta,
         user_metadata=user_meta,
         exp=payload.get("exp"),

@@ -1,12 +1,12 @@
 from typing import Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ExecuteRequest(BaseModel):
     language: Literal["python", "javascript", "cpp"] = "python"
-    source_code: str = Field(..., min_length=1)
-    stdin: str = ""
+    source_code: str = Field(..., min_length=1, max_length=100_000)
+    stdin: str = Field(default="", max_length=20_000)
 
 
 class ExecuteResponse(BaseModel):
@@ -29,11 +29,12 @@ class TestCaseInput(BaseModel):
 
 
 class SubmissionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     problem_id: str = Field(..., min_length=1)
     language: Literal["python", "javascript", "cpp"] = "python"
-    source_code: str = Field(..., min_length=1)
-    stdin: str = ""
-    test_cases: List[TestCaseInput] = Field(default_factory=list)
+    source_code: str = Field(..., min_length=1, max_length=100_000)
+    stdin: str = Field(default="", max_length=20_000)
     mode: Literal["run", "submit"] = "submit"
 
 

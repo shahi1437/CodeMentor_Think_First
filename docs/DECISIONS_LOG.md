@@ -24,3 +24,17 @@
 - Grade submissions against database-owned `problem_test_cases`; return and persist only verdict/count summaries, not test inputs or outputs.
 - Exclude runtime metadata and outputs from student submission history so old rows cannot leak hidden cases.
 - Apply the additive column-grant migration before claiming direct Supabase-client privacy; its live execution remains unverified.
+
+## 2026-11-19 — Fail-closed authentication and persistence
+
+- Database profile roles are authoritative; JWT metadata roles cannot grant access when role verification fails.
+- Missing JWT/database configuration, role lookup failures, and unconfirmed writes produce explicit errors rather than local success-shaped fallbacks.
+- Teachers do not receive unscoped profile or submission reads without an authorized course scope.
+
+## 2026-11-20 — Judge0 result integrity and database-backed problem flow
+
+- Only Judge0 status IDs 1 and 2 are treated as pending; external request/poll timeouts are service errors, not student time-limit verdicts.
+- Judge0 submissions include bounded CPU, wall-clock, memory, and output limits; live provider behavior remains unverified.
+- Problem catalog and workspace routes use database-backed API data with public samples; hidden tests remain on the server.
+- Debugging success comes only from the backend grading verdict. Client code-text heuristics and simulated challenge/test results are removed.
+- Progressive hints are exposed one requested tier at a time, never in the public problem response.

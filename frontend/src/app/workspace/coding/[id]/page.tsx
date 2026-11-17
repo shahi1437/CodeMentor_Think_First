@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import {
@@ -12,20 +12,65 @@ import {
   Terminal,
 } from 'lucide-react';
 import { AppShell } from '@/components/layout/AppShell';
-import { SimulationBanner } from '@/components/ui/SimulationBanner';
 import { CodeEditor } from '@/components/ui/CodeEditor';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
-import { SAMPLE_PROBLEMS } from '@/lib/mock-data';
+
+type Language = 'python' | 'javascript' | 'cpp';
+interface ProblemRecord {
+  id: string;
+  title: string;
+  difficulty: string;
+  category: string;
+  description: string;
+  problem_mode: 'normal' | 'debugging' | 'both';
+  tags: string[];
+  supported_languages: string[];
+  starter_code: Partial<Record<Language, string>>;
+}
+interface SampleCase {
+  id: string;
+  name: string;
+  input_text: string;
+  expected_output: string;
+}
+interface SubmissionRecord {
+  id: string;
+  problem_id: string;
+  status: string;
+  language: string;
+  created_at: string;
+}
+
+const backendUrl =
+  process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_BACKEND_URL || '';
+const languages: Language[] = ['python', 'javascript', 'cpp'];
+
+async function getAccessToken() {
+  const supabase = getSupabaseBrowserClient();
+  if (!supabase) {
+    throw new Error('Supabase authentication is not configured in this environment.');
+  }
+  const { data: { session }, error } = await supabase.auth.getSession();
+  if (error || !session?.access_token) {
+    throw new Error('A valid user session is required to access the problem workspace.');
+  }
+  return session.access_token;
+}
 
 export default function NormalCodingWorkspace() {
   const params = useParams();
   const problemId = params?.id as string;
 
-  const problem = SAMPLE_PROBLEMS.find((p) => p.id === problemId) || SAMPLE_PROBLEMS[0];
+  const [problem, setProblem] = useState<ProblemRecord | null>(null);
+  const [sampleCases, setSampleCases] = useState<SampleCase[]>([]);
+  const [problemLoading, setProblemLoading] = useState(true);
+  const [problemError, setProblemError] = useState<string | null>(null);
+  const [submissionHistory, setSubmissionHistory] = useState<SubmissionRecord[]>([]);
+  const [historyError, setHistoryError] = useState<string | null>(null);
 
   const [activeTab, setActiveTab] = useState<'description' | 'submissions'>('description');
   const [activeTestCaseTab, setActiveTestCaseTab] = useState<number>(0);
-  const [code, setCode] = useState(problem.starterCode.python);
+  const [code, setCode] = useState('');
   const [language, setLanguage] = useState<'python' | 'javascript' | 'cpp'>('python');
   const [isRunning, setIsRunning] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -42,28 +87,95 @@ export default function NormalCodingWorkspace() {
     totalTestCount?: number;
   }>({ status: 'idle' });
 
+  const supportedLanguages = useMemo(
+    () => (problem?.supported_languages || []).filter((item): item is Language =>
+      languages.includes(item as Language),
+    ),
+    [problem],
+  );
+
+  useEffect(() => {
+    let active = true;
+    const loadProblem = async () => {
+      setProblemLoading(true);
+      setProblemError(null);
+      try {
+        if (!backendUrl) throw new Error('Set NEXT_PUBLIC_API_URL or NEXT_PUBLIC_BACKEND_URL to connect to the backend.');
+        const accessToken = await getAccessToken();
+        const headers = { Authorization: `Bearer ${accessToken}` };
+        const [problemResponse, samplesResponse] = await Promise.all([
+          fetch(`${backendUrl}/api/v1/platform/problems/${encodeURIComponent(problemId)}`, { headers }),
+          fetch(`${backendUrl}/api/v1/platform/problems/${encodeURIComponent(problemId)}/samples`, { headers }),
+        ]);
+        const problemBody = await problemResponse.json().catch(() => null);
+        const samplesBody = await samplesResponse.json().catch(() => null);
+        if (!problemResponse.ok) {
+          throw new Error(problemBody?.detail || 'Unable to load this problem.');
+        }
+        if (!samplesResponse.ok) {
+          throw new Error(samplesBody?.detail || 'Unable to load sample test cases.');
+        }
+        if (!problemBody || !Array.isArray(samplesBody)) {
+          throw new Error('The server returned invalid problem data.');
+        }
+        if (problemBody.problem_mode === 'debugging') {
+          throw new Error('This problem is available in Debugging Mode.');
+        }
+        if (active) {
+          const record = problemBody as ProblemRecord;
+          setProblem(record);
+          setSampleCases(samplesBody as SampleCase[]);
+          const nextLanguage = (record.supported_languages || []).find((item) =>
+            languages.includes(item as Language),
+          ) as Language | undefined;
+          if (nextLanguage) {
+            setLanguage(nextLanguage);
+            setCode(record.starter_code?.[nextLanguage] || '');
+          } else {
+            setProblemError('This problem does not have a supported execution language configured.');
+          }
+        }
+      } catch (error) {
+        if (active) setProblemError(error instanceof Error ? error.message : 'Unable to load this problem.');
+      } finally {
+        if (active) setProblemLoading(false);
+      }
+    };
+    void loadProblem();
+    return () => { active = false; };
+  }, [problemId]);
+
+  useEffect(() => {
+    if (!problem) return;
+    let active = true;
+    const loadHistory = async () => {
+      setHistoryError(null);
+      try {
+        const accessToken = await getAccessToken();
+        const response = await fetch(`${backendUrl}/api/v1/platform/submissions`, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+        const body = await response.json().catch(() => null);
+        if (!response.ok) throw new Error(body?.detail || 'Unable to load submission history.');
+        if (active && Array.isArray(body)) {
+          setSubmissionHistory(body.filter((item: SubmissionRecord) => item.problem_id === problemId));
+        }
+      } catch (error) {
+        if (active) setHistoryError(error instanceof Error ? error.message : 'Unable to load submission history.');
+      }
+    };
+    void loadHistory();
+    return () => { active = false; };
+  }, [problem, problemId]);
+
   const runPlatformRequest = async (endpoint: 'execute' | 'submit', payload: Record<string, unknown>) => {
-    const supabase = getSupabaseBrowserClient();
-    if (!supabase) {
-      throw new Error('Supabase is not configured. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.');
-    }
-
-    const {
-      data: { session },
-      error,
-    } = await supabase.auth.getSession();
-
-    if (error || !session?.access_token) {
-      throw new Error('A valid user session is required to run code in the backend sandbox.');
-    }
-
-    const backendUrl =
-      process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
+    if (!backendUrl) throw new Error('Set NEXT_PUBLIC_API_URL or NEXT_PUBLIC_BACKEND_URL to connect to the backend.');
+    const accessToken = await getAccessToken();
     const response = await fetch(`${backendUrl}/api/v1/platform/${endpoint}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${session.access_token}`,
+        Authorization: `Bearer ${accessToken}`,
       },
       body: JSON.stringify(payload),
     });
@@ -77,6 +189,10 @@ export default function NormalCodingWorkspace() {
   };
 
   const handleRunSampleTests = async () => {
+    if (!problem || !sampleCases[activeTestCaseTab]) {
+      setExecutionResult({ status: 'error', message: 'No public sample test case is available to run.' });
+      return;
+    }
     setIsRunning(true);
     setExecutionResult({ status: 'running' });
 
@@ -84,11 +200,11 @@ export default function NormalCodingWorkspace() {
       const payload = {
         language,
         source_code: code,
-        stdin: problem.sampleTestCases[activeTestCaseTab]?.input ?? '',
+        stdin: sampleCases[activeTestCaseTab]?.input_text ?? '',
       };
       const result = await runPlatformRequest('execute', payload);
       const actualOutput = String(result.stdout || '').trim();
-      const expectedOutput = String(problem.sampleTestCases[activeTestCaseTab]?.expectedOutput || '').trim();
+      const expectedOutput = String(sampleCases[activeTestCaseTab]?.expected_output || '').trim();
       const matchedSample = result.status === 'accepted' && actualOutput === expectedOutput;
       const normalizedStatus =
         matchedSample
@@ -130,6 +246,7 @@ export default function NormalCodingWorkspace() {
   };
 
   const handleSubmit = async () => {
+    if (!problem) return;
     setIsSubmitting(true);
     setExecutionResult({ status: 'running' });
 
@@ -171,6 +288,20 @@ export default function NormalCodingWorkspace() {
         passedTestCount: result.passed_test_count,
         totalTestCount: result.total_test_count,
       });
+      try {
+        const accessToken = await getAccessToken();
+        const historyResponse = await fetch(`${backendUrl}/api/v1/platform/submissions`, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+        const historyBody = await historyResponse.json().catch(() => null);
+        if (!historyResponse.ok) throw new Error(historyBody?.detail || 'Unable to refresh submission history.');
+        if (Array.isArray(historyBody)) {
+          setSubmissionHistory(historyBody.filter((item: SubmissionRecord) => item.problem_id === problemId));
+          setHistoryError(null);
+        }
+      } catch (error) {
+        setHistoryError(error instanceof Error ? error.message : 'Unable to refresh submission history.');
+      }
     } catch (error) {
       setExecutionResult({
         status: 'error',
@@ -180,6 +311,31 @@ export default function NormalCodingWorkspace() {
       setIsSubmitting(false);
     }
   };
+
+  if (problemLoading) {
+    return (
+      <AppShell hideFooter>
+        <div className="flex min-h-[60vh] items-center justify-center gap-3 text-sm text-slate-300" role="status">
+          <span className="h-5 w-5 animate-spin rounded-full border-2 border-indigo-400/30 border-t-indigo-400" />
+          Loading problem from the database...
+        </div>
+      </AppShell>
+    );
+  }
+
+  if (!problem || problemError) {
+    return (
+      <AppShell hideFooter>
+        <div className="mx-auto mt-12 max-w-xl rounded-2xl border border-rose-500/30 bg-navy-900 p-6 text-center" role="alert">
+          <h1 className="text-lg font-bold text-white">Problem unavailable</h1>
+          <p className="mt-2 text-sm text-slate-300">{problemError || 'The requested problem could not be loaded.'}</p>
+          <Link href="/problems" className="mt-5 inline-flex rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500">
+            Return to Problem Hub
+          </Link>
+        </div>
+      </AppShell>
+    );
+  }
 
   return (
     <AppShell hideFooter>
@@ -223,7 +379,7 @@ export default function NormalCodingWorkspace() {
 
             <button
               onClick={handleRunSampleTests}
-              disabled={isRunning || isSubmitting}
+              disabled={isRunning || isSubmitting || sampleCases.length === 0}
               className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-700 hover:text-white transition-colors disabled:opacity-50"
             >
               <Play className="h-3 w-3 fill-slate-300" />
@@ -239,11 +395,6 @@ export default function NormalCodingWorkspace() {
               <span>{isSubmitting ? 'Grading...' : 'Submit Solution'}</span>
             </button>
           </div>
-        </div>
-
-        {/* Notice Banner */}
-        <div className="px-4 pt-2">
-          <SimulationBanner featureName="Judge0 CE Code Execution" />
         </div>
 
         {/* Main Split Panels */}
@@ -270,7 +421,7 @@ export default function NormalCodingWorkspace() {
                     : 'border-transparent text-slate-400 hover:text-slate-200'
                 }`}
               >
-                Submissions (5)
+                Submissions ({submissionHistory.length})
               </button>
             </div>
 
@@ -288,38 +439,44 @@ export default function NormalCodingWorkspace() {
                     <h4 className="font-semibold text-white uppercase text-[11px] tracking-wider">
                       Sample Examples
                     </h4>
-                    {problem.sampleTestCases.map((tc, idx) => (
+                    {sampleCases.length ? sampleCases.map((tc, idx) => (
                       <div key={tc.id} className="rounded-xl border border-slate-800 bg-navy-950/80 p-3 font-mono text-[11px]">
                         <span className="text-slate-400 font-bold block mb-1">Example {idx + 1}:</span>
                         <div className="text-slate-300">
-                          <span className="text-slate-500">Input: </span>{tc.input}
+                          <span className="text-slate-500">Input: </span>{tc.input_text}
                         </div>
                         <div className="text-emerald-400">
-                          <span className="text-slate-500">Expected Output: </span>{tc.expectedOutput}
+                          <span className="text-slate-500">Expected Output: </span>{tc.expected_output}
                         </div>
                       </div>
-                    ))}
+                    )) : <p className="text-slate-500">No public sample cases have been configured.</p>}
                   </div>
 
                   <div className="rounded-xl border border-slate-800 bg-navy-950/40 p-3 text-[11px] text-slate-400">
-                    <span className="font-bold text-slate-300 block mb-1">Constraints:</span>
-                    <ul className="list-disc pl-4 space-y-1">
-                      <li>2 &le; nums.length &le; 10⁴</li>
-                      <li>-10⁹ &le; nums[i] &le; 10⁹</li>
-                      <li>Only one valid answer exists.</li>
-                    </ul>
+                    <span className="font-bold text-slate-300 block mb-1">Topic</span>
+                    <span>{problem.category}</span>
+                    {!!problem.tags?.length && <p className="mt-2">Tags: {problem.tags.join(', ')}</p>}
                   </div>
                 </>
               ) : (
-                /* Submissions Tab */
                 <div className="space-y-3">
-                  <div className="rounded-xl border border-emerald-500/30 bg-emerald-950/20 p-3 text-xs flex items-center justify-between">
-                    <div>
-                      <span className="font-bold text-emerald-400">Accepted</span>
-                      <p className="text-[11px] text-slate-400 mt-0.5">Runtime: 42ms • Memory: 15.2MB</p>
+                  {historyError && <p className="text-rose-300" role="alert">{historyError}</p>}
+                  {submissionHistory.length === 0 && !historyError && (
+                    <p className="text-slate-400">No submissions for this problem yet.</p>
+                  )}
+                  {submissionHistory.map((submission) => (
+                    <div key={submission.id} className="rounded-xl border border-slate-800 bg-navy-950/60 p-3 text-xs flex items-center justify-between">
+                      <div>
+                        <span className={`font-bold ${submission.status === 'passed' ? 'text-emerald-400' : submission.status === 'failed' ? 'text-amber-300' : 'text-rose-300'}`}>
+                          {submission.status === 'passed' ? 'Accepted' : submission.status === 'failed' ? 'Failed' : 'Execution Error'}
+                        </span>
+                        <p className="text-[11px] text-slate-400 mt-0.5">{submission.language}</p>
+                      </div>
+                      <time className="text-[11px] text-slate-500" dateTime={submission.created_at}>
+                        {new Date(submission.created_at).toLocaleString()}
+                      </time>
                     </div>
-                    <span className="text-[11px] text-slate-500">10 mins ago</span>
-                  </div>
+                  ))}
                 </div>
               )}
             </div>
@@ -331,6 +488,7 @@ export default function NormalCodingWorkspace() {
               <CodeEditor
                 initialCode={code}
                 language={language}
+                supportedLanguages={supportedLanguages}
                 onCodeChange={(newCode) => setCode(newCode)}
                 onLanguageChange={(nextLanguage) => setLanguage(nextLanguage)}
                 height="320px"
@@ -344,7 +502,7 @@ export default function NormalCodingWorkspace() {
                   <Terminal className="h-3.5 w-3.5 text-teal-400" />
                   <span className="font-semibold text-slate-300">Test Console</span>
                   <div className="h-3 w-px bg-slate-800 mx-1"></div>
-                  {problem.sampleTestCases.map((tc, idx) => (
+                  {sampleCases.map((tc, idx) => (
                     <button
                       key={tc.id}
                       onClick={() => setActiveTestCaseTab(idx)}
@@ -391,7 +549,7 @@ export default function NormalCodingWorkspace() {
                     <div className="rounded-xl border border-slate-800 bg-navy-950 p-3 space-y-1.5 text-[11px]">
                       <div className="text-slate-400">
                         <span className="text-slate-500">Input: </span>
-                        {problem.sampleTestCases[activeTestCaseTab]?.input}
+                        {sampleCases[activeTestCaseTab]?.input_text}
                       </div>
                       <div className="text-emerald-400">
                         <span className="text-slate-500">Your Output: </span>
@@ -410,6 +568,12 @@ export default function NormalCodingWorkspace() {
                   <div className="space-y-2 text-slate-300">
                     <p className="font-semibold text-rose-300">Execution status: {executionResult.status}</p>
                     {executionResult.message && <p>{executionResult.message}</p>}
+                    {executionResult.compileOutput && (
+                      <div className="rounded-lg bg-rose-950/20 p-2.5 border border-rose-500/20">
+                        <span className="block text-[10px] uppercase text-rose-400 mb-1">Compiler output</span>
+                        <pre className="whitespace-pre-wrap text-[11px] text-rose-200">{executionResult.compileOutput}</pre>
+                      </div>
+                    )}
                     {executionResult.stdout && (
                       <div className="rounded-lg bg-navy-950 p-2.5 border border-slate-800">
                         <span className="block text-[10px] uppercase text-slate-500 mb-1">Output</span>
@@ -427,7 +591,7 @@ export default function NormalCodingWorkspace() {
                   <div className="text-slate-400 text-xs font-sans space-y-2">
                     <p className="font-semibold text-slate-300">Sample Case {activeTestCaseTab + 1}:</p>
                     <div className="rounded-lg bg-navy-950 p-2.5 font-mono text-[11px] border border-slate-800">
-                      {problem.sampleTestCases[activeTestCaseTab]?.input}
+                      {sampleCases[activeTestCaseTab]?.input_text}
                     </div>
                     <p className="text-[11px] text-slate-500">
                       Click <strong className="text-slate-300">Run Samples</strong> to evaluate your code against public test cases.
