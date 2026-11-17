@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     # Supabase Configuration
     # In production, SUPABASE_JWT_SECRET matches your Supabase Project Settings -> API -> JWT Secret
     SUPABASE_URL: str = ""
-    SUPABASE_JWT_SECRET: str = "dev-secret-key-change-in-production-supabase-jwt-secret-key-32chars"
+    SUPABASE_JWT_SECRET: str = ""
     SUPABASE_SERVICE_ROLE_KEY: str = ""
 
     # Judge0 CE Execution

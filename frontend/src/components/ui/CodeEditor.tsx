@@ -7,6 +7,7 @@ import { Copy, RotateCcw, Check, Code } from 'lucide-react';
 interface CodeEditorProps {
   initialCode: string;
   language?: 'python' | 'javascript' | 'cpp';
+  supportedLanguages?: Array<'python' | 'javascript' | 'cpp'>;
   onCodeChange?: (code: string) => void;
   onLanguageChange?: (language: 'python' | 'javascript' | 'cpp') => void;
   readOnly?: boolean;
@@ -17,6 +18,7 @@ interface CodeEditorProps {
 export const CodeEditor: React.FC<CodeEditorProps> = ({
   initialCode,
   language = 'python',
+  supportedLanguages = ['python', 'javascript', 'cpp'],
   onCodeChange,
   onLanguageChange,
   readOnly = false,
@@ -78,9 +80,15 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
               onChange={(event) => handleLanguageChange(event.target.value as 'python' | 'javascript' | 'cpp')}
               className="bg-transparent text-xs text-slate-200 outline-none cursor-pointer hover:text-white"
             >
-              <option value="python" className="bg-navy-900">solution.py (Python 3.12)</option>
-              <option value="javascript" className="bg-navy-900">solution.js (Node.js)</option>
-              <option value="cpp" className="bg-navy-900">solution.cpp (C++20)</option>
+              {supportedLanguages.includes('python') && (
+                <option value="python" className="bg-navy-900">solution.py (Python 3.12)</option>
+              )}
+              {supportedLanguages.includes('javascript') && (
+                <option value="javascript" className="bg-navy-900">solution.js (Node.js)</option>
+              )}
+              {supportedLanguages.includes('cpp') && (
+                <option value="cpp" className="bg-navy-900">solution.cpp (C++20)</option>
+              )}
             </select>
           </div>
         </div>

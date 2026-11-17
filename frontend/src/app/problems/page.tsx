@@ -1,50 +1,108 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
   Search,
-  Filter,
   Code2,
   Bug,
-  Sparkles,
   ArrowRight,
   RotateCcw,
-  Layers,
-  ChevronRight,
   AlertCircle,
-  Tag,
 } from 'lucide-react';
 import { AppShell } from '@/components/layout/AppShell';
-import { SimulationBanner } from '@/components/ui/SimulationBanner';
-import { SAMPLE_PROBLEMS } from '@/lib/mock-data';
-import { ProblemDifficulty, ProblemMode } from '@/types';
+import { getSupabaseBrowserClient } from '@/lib/supabase/client';
+
+interface ProblemRecord {
+  id: string;
+  title: string;
+  slug: string;
+  difficulty: string;
+  category: string;
+  problem_mode: 'normal' | 'debugging' | 'both';
+  tags: string[];
+  supported_languages: string[];
+  description: string;
+}
+
+const backendUrl =
+  process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_BACKEND_URL || '';
 
 export default function ProblemHubPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedDifficulty, setSelectedDifficulty] = useState<string>('all');
   const [selectedMode, setSelectedMode] = useState<string>('all');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
-  const [isLoading, setIsLoading] = useState(false);
+  const [selectedLanguage, setSelectedLanguage] = useState<string>('all');
+  const [problems, setProblems] = useState<ProblemRecord[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  // Extract unique categories
-  const categories = Array.from(new Set(SAMPLE_PROBLEMS.map((p) => p.category)));
+  const loadProblems = useCallback(async () => {
+    setIsLoading(true);
+    setLoadError(null);
+    try {
+      const supabase = getSupabaseBrowserClient();
+      if (!supabase) {
+        throw new Error('Supabase authentication is not configured in this environment.');
+      }
+      if (!backendUrl) {
+        throw new Error('Set NEXT_PUBLIC_API_URL or NEXT_PUBLIC_BACKEND_URL to connect to the backend.');
+      }
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError) throw sessionError;
+      if (!session) throw new Error('Please sign in to browse published problems.');
+
+      const response = await fetch(`${backendUrl}/api/v1/platform/problems`, {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        throw new Error(body?.detail || 'Unable to load problems from the server.');
+      }
+      const data: unknown = await response.json();
+      if (!Array.isArray(data)) throw new Error('The server returned an invalid problem catalog.');
+      setProblems(data as ProblemRecord[]);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : 'Unable to load problems.');
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadProblems();
+  }, [loadProblems]);
+
+  const categories = useMemo(
+    () => Array.from(new Set(problems.map((problem) => problem.category))),
+    [problems],
+  );
+  const availableLanguages = useMemo(
+    () => Array.from(new Set(problems.flatMap((problem) => problem.supported_languages || []))).sort(),
+    [problems],
+  );
 
   // Filter logic
-  const filteredProblems = SAMPLE_PROBLEMS.filter((p) => {
+  const filteredProblems = problems.filter((p) => {
     const matchesSearch =
       p.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      p.tags.some((t) => t.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (p.tags || []).some((t) => t.toLowerCase().includes(searchTerm.toLowerCase())) ||
       p.description.toLowerCase().includes(searchTerm.toLowerCase());
 
+    const difficultyLabel = ({ beginner: 'Easy', intermediate: 'Medium', advanced: 'Hard' } as Record<string, string>)[
+      p.difficulty.toLowerCase()
+    ] || p.difficulty;
     const matchesDifficulty =
-      selectedDifficulty === 'all' || p.difficulty.toLowerCase() === selectedDifficulty.toLowerCase();
+      selectedDifficulty === 'all' || difficultyLabel.toLowerCase() === selectedDifficulty.toLowerCase();
 
-    const matchesMode = selectedMode === 'all' || p.mode === selectedMode;
+    const matchesMode = selectedMode === 'all' || p.problem_mode === selectedMode || p.problem_mode === 'both';
 
     const matchesCategory = selectedCategory === 'all' || p.category === selectedCategory;
+    const matchesLanguage =
+      selectedLanguage === 'all' || (p.supported_languages || []).includes(selectedLanguage);
 
-    return matchesSearch && matchesDifficulty && matchesMode && matchesCategory;
+    return matchesSearch && matchesDifficulty && matchesMode && matchesCategory && matchesLanguage;
   });
 
   const resetFilters = () => {
@@ -52,25 +110,19 @@ export default function ProblemHubPage() {
     setSelectedDifficulty('all');
     setSelectedMode('all');
     setSelectedCategory('all');
-  };
-
-  const simulateLoading = () => {
-    setIsLoading(true);
-    setTimeout(() => setIsLoading(false), 500);
+    setSelectedLanguage('all');
   };
 
   return (
     <AppShell>
       <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-        <SimulationBanner featureName="Unified Problem Repository" />
-
         {/* Page Title */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between border-b border-slate-800/80 pb-6 gap-4">
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">Problem Hub</h1>
               <span className="rounded-full bg-indigo-500/10 px-2.5 py-0.5 text-xs font-semibold text-indigo-400 border border-indigo-500/30">
-                {SAMPLE_PROBLEMS.length} Curated Challenges
+                {problems.length} Published Challenges
               </span>
             </div>
             <p className="mt-1 text-xs text-slate-400">
@@ -112,6 +164,17 @@ export default function ProblemHubPage() {
               <option value="all">All Categories</option>
               {categories.map((c) => (
                 <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+            <select
+              value={selectedLanguage}
+              onChange={(e) => setSelectedLanguage(e.target.value)}
+              className="rounded-xl border border-slate-700 bg-navy-950 px-3 py-2 text-xs text-slate-300 outline-none hover:border-slate-600 focus:border-indigo-500"
+              aria-label="Filter by programming language"
+            >
+              <option value="all">All Languages</option>
+              {availableLanguages.map((language) => (
+                <option key={language} value={language}>{language}</option>
               ))}
             </select>
           </div>
@@ -176,6 +239,26 @@ export default function ProblemHubPage() {
                 <div key={i} className="h-20 w-full animate-pulse rounded-2xl bg-slate-800/40"></div>
               ))}
             </div>
+          ) : loadError ? (
+            <div className="rounded-2xl border border-rose-500/30 bg-rose-950/20 p-8 text-center" role="alert">
+              <AlertCircle className="mx-auto h-9 w-9 text-rose-400 mb-3" />
+              <h3 className="text-base font-bold text-white">Problem catalog unavailable</h3>
+              <p className="mt-2 text-sm text-slate-300">{loadError}</p>
+              <button
+                onClick={() => void loadProblems()}
+                className="mt-4 rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-500"
+              >
+                Try again
+              </button>
+            </div>
+          ) : problems.length === 0 ? (
+            <div className="rounded-2xl border border-slate-800 bg-navy-900/40 p-12 text-center">
+              <AlertCircle className="mx-auto h-10 w-10 text-slate-500 mb-3" />
+              <h3 className="text-base font-bold text-white">No published problems yet</h3>
+              <p className="mt-1 text-xs text-slate-400 max-w-sm mx-auto">
+                Published coding and debugging problems will appear here when the database is configured.
+              </p>
+            </div>
           ) : filteredProblems.length === 0 ? (
             /* Empty State */
             <div className="rounded-2xl border border-slate-800 bg-navy-900/40 p-12 text-center">
@@ -196,8 +279,16 @@ export default function ProblemHubPage() {
             /* Success State: Problem Cards Grid */
             <div className="space-y-3">
               {filteredProblems.map((problem) => {
+                const isDebugging =
+                  problem.problem_mode === 'debugging' ||
+                  (problem.problem_mode === 'both' && selectedMode === 'debugging');
+                const difficultyLabel = ({
+                  beginner: 'Easy',
+                  intermediate: 'Medium',
+                  advanced: 'Hard',
+                } as Record<string, string>)[problem.difficulty.toLowerCase()] || problem.difficulty;
                 const targetUrl =
-                  problem.mode === 'debugging'
+                  isDebugging
                     ? `/workspace/debugging/${problem.id}`
                     : `/workspace/coding/${problem.id}`;
 
@@ -211,25 +302,25 @@ export default function ProblemHubPage() {
                         {/* Mode badge */}
                         <span
                           className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide border ${
-                            problem.mode === 'debugging'
+                            isDebugging
                               ? 'bg-amber-500/10 text-amber-300 border-amber-500/30'
                               : 'bg-indigo-500/10 text-indigo-300 border-indigo-500/30'
                           }`}
                         >
-                          {problem.mode === 'debugging' ? '🐞 Debugging Lab' : '💻 Normal Coding'}
+                          {isDebugging ? '🐞 Debugging Lab' : problem.problem_mode === 'both' ? 'Coding + Debugging' : '💻 Normal Coding'}
                         </span>
 
                         {/* Difficulty badge */}
                         <span
                           className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
-                            problem.difficulty === 'Easy'
+                            difficultyLabel === 'Easy'
                               ? 'bg-emerald-500/10 text-emerald-400'
-                              : problem.difficulty === 'Medium'
+                              : difficultyLabel === 'Medium'
                               ? 'bg-amber-500/10 text-amber-400'
                               : 'bg-rose-500/10 text-rose-400'
                           }`}
                         >
-                          {problem.difficulty}
+                          {difficultyLabel}
                         </span>
 
                         <span className="text-xs text-slate-500">•</span>
@@ -242,7 +333,7 @@ export default function ProblemHubPage() {
 
                       {/* Tags */}
                       <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                        {problem.tags.map((tag) => (
+                        {(problem.tags || []).map((tag) => (
                           <span
                             key={tag}
                             className="rounded-md bg-navy-950 px-2 py-0.5 text-[10px] font-medium text-slate-400 border border-slate-800/80"
@@ -251,7 +342,7 @@ export default function ProblemHubPage() {
                           </span>
                         ))}
                         <span className="text-[11px] text-slate-500 ml-2">
-                          Acceptance: {problem.acceptanceRate}%
+                          Languages: {(problem.supported_languages || []).join(', ') || 'Not configured'}
                         </span>
                       </div>
                     </div>
@@ -261,12 +352,12 @@ export default function ProblemHubPage() {
                       <Link
                         href={targetUrl}
                         className={`flex items-center gap-1.5 rounded-xl px-4 py-2 text-xs font-bold text-white transition-all shadow-md ${
-                          problem.mode === 'debugging'
+                          isDebugging
                             ? 'bg-amber-600 hover:bg-amber-500 shadow-amber-600/20'
                             : 'bg-indigo-600 hover:bg-indigo-500 shadow-indigo-600/20'
                         }`}
                       >
-                        <span>{problem.mode === 'debugging' ? 'Diagnose Bug' : 'Solve Problem'}</span>
+                        <span>{isDebugging ? 'Diagnose Bug' : 'Solve Problem'}</span>
                         <ArrowRight className="h-3.5 w-3.5" />
                       </Link>
                     </div>

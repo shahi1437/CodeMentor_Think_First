@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.app.core.config import settings
+from backend.app.core import role_store
 from backend.app.core import ai_mentor
 from backend.app.core.ml_classifier import ErrorClassifier
 from backend.app.core.learning_dna import summarize_learning_dna
@@ -18,6 +19,8 @@ client = TestClient(app)
 
 
 def create_test_token(sub: str, email: str, role: str, expires_in: int = 3600) -> str:
+    if role_store.get_user_role(sub) is None:
+        role_store.set_user_role(sub, role)
     payload = {
         "sub": sub,
         "email": email,
@@ -261,6 +264,78 @@ def test_problem_endpoints_never_return_hidden_test_cases(monkeypatch):
     assert "private-output" not in detail_response.text
 
 
+def test_problem_samples_and_hints_are_retrieved_without_hidden_data(monkeypatch):
+    class ConfiguredDatabase:
+        configured = True
+
+        def get_problem(self, problem_id):
+            return {
+                "id": problem_id,
+                "is_published": True,
+                "problem_mode": "debugging",
+                "progressive_hints": ["private future hint"],
+            }
+
+        def list_public_problem_test_cases(self, problem_id, limit):
+            assert limit == 10
+            return [{"id": "sample-1", "input_text": "1", "expected_output": "2"}]
+
+        def list_problem_hints(self, problem_id):
+            return ["Consider the loop boundary.", "Inspect the update expression."]
+
+        def list_problem_hint_progress(self, user_id, problem_id):
+            assert user_id == "student-debug-samples"
+            return [1]
+
+        def record_problem_hint_tier(self, user_id, problem_id, tier):
+            assert (user_id, problem_id, tier) == ("student-debug-samples", "debug-problem", 2)
+
+    monkeypatch.setattr(platform, "get_database_service", lambda: ConfiguredDatabase())
+    token = create_test_token("student-debug-samples", "student@example.com", "student")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    samples = client.get("/api/v1/platform/problems/debug-problem/samples", headers=headers)
+    hint = client.get("/api/v1/platform/problems/debug-problem/hints/2", headers=headers)
+
+    assert samples.status_code == 200
+    assert samples.json() == [{"id": "sample-1", "input_text": "1", "expected_output": "2"}]
+    assert "private" not in samples.text
+    assert hint.status_code == 200
+    assert hint.json() == {"tier": 2, "hint": "Inspect the update expression."}
+    assert "Consider the loop boundary." not in hint.text
+
+
+def test_problem_hint_endpoint_prevents_skipping_tiers(monkeypatch):
+    class ConfiguredDatabase:
+        configured = True
+
+        def get_problem(self, problem_id):
+            return {"id": problem_id, "is_published": True, "problem_mode": "debugging"}
+
+        def list_problem_hint_progress(self, _user_id, _problem_id):
+            return []
+
+    monkeypatch.setattr(platform, "get_database_service", lambda: ConfiguredDatabase())
+    token = create_test_token("student-debug-skip-hint", "student@example.com", "student")
+    response = client.get(
+        "/api/v1/platform/problems/debug-problem/hints/2",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 409
+    assert "previous hint tier" in response.json()["detail"]
+
+
+def test_problem_hints_reject_invalid_tiers(monkeypatch):
+    token = create_test_token("student-debug-invalid-tier", "student@example.com", "student")
+    response = client.get(
+        "/api/v1/platform/problems/debug-problem/hints/5",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 422
+
+
 def test_learning_dna_endpoint_aggregates_only_current_users_submissions(monkeypatch):
     class ConfiguredDatabase:
         configured = True
@@ -372,7 +447,6 @@ def test_submission_uses_backend_test_cases_without_returning_hidden_data(monkey
             "problem_id": "problem-graded",
             "language": "python",
             "source_code": "print('output')",
-            "test_cases": [{"input": "client-controlled", "expected_output": "client-controlled"}],
         },
     )
 
@@ -383,6 +457,45 @@ def test_submission_uses_backend_test_cases_without_returning_hidden_data(monkey
     assert "hidden-case-input" not in response.text
     assert "hidden-result" not in response.text
     assert "hidden-case-input" not in str(stored["runtime_metadata"])
+
+
+def test_submission_rejects_client_supplied_test_cases():
+    token = create_test_token("student-client-tests", "student@example.com", "student")
+    response = client.post(
+        "/api/v1/platform/submit",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "problem_id": "problem-1",
+            "language": "python",
+            "source_code": "print(1)",
+            "test_cases": [{"input": "hidden", "expected_output": "answer", "is_hidden": True}],
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_submission_rejects_language_not_enabled_for_problem(monkeypatch):
+    class ConfiguredDatabase:
+        configured = True
+
+        def get_problem(self, problem_id):
+            return {
+                "id": problem_id,
+                "is_published": True,
+                "supported_languages": ["python"],
+            }
+
+    monkeypatch.setattr(platform, "get_database_service", lambda: ConfiguredDatabase())
+    token = create_test_token("student-language-filter", "student@example.com", "student")
+    response = client.post(
+        "/api/v1/platform/submit",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"problem_id": "problem-language", "language": "javascript", "source_code": "console.log(1)"},
+    )
+
+    assert response.status_code == 422
+    assert "does not support" in response.json()["detail"]
 
 
 def test_student_submission_history_hides_legacy_test_outputs_and_other_users(monkeypatch):
@@ -437,3 +550,19 @@ def test_student_submission_history_hides_legacy_test_outputs_and_other_users(mo
     assert "legacy-hidden-output" not in response.text
     assert "private-execution-output" not in response.text
     assert "submission-other" not in response.text
+
+
+@pytest.mark.parametrize(
+    ("path", "expected_detail"),
+    [
+        ("/api/v1/platform/profile/student-2", "authorized course scope"),
+        ("/api/v1/platform/submissions", "authorized course scope"),
+        ("/api/v1/platform/profiles", "authorized course scope"),
+    ],
+)
+def test_teacher_cannot_read_unscoped_student_records(path, expected_detail):
+    token = create_test_token("teacher-unscoped", "teacher@example.com", "teacher")
+    response = client.get(path, headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 403
+    assert expected_detail in response.json()["detail"]

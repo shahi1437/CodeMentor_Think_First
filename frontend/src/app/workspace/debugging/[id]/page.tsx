@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import {
@@ -16,100 +16,201 @@ import {
   XCircle,
 } from 'lucide-react';
 import { AppShell } from '@/components/layout/AppShell';
-import { SimulationBanner } from '@/components/ui/SimulationBanner';
 import { CodeEditor } from '@/components/ui/CodeEditor';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
-import { SAMPLE_PROBLEMS } from '@/lib/mock-data';
+
+type Language = 'python' | 'javascript' | 'cpp';
+interface ProblemRecord {
+  id: string;
+  title: string;
+  difficulty: string;
+  category: string;
+  description: string;
+  problem_mode: 'normal' | 'debugging' | 'both';
+  supported_languages: string[];
+  starter_code: Partial<Record<Language, string>>;
+}
+interface SampleCase {
+  id: string;
+  name: string;
+  input_text: string;
+  expected_output: string;
+}
+
+const backendUrl =
+  process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_BACKEND_URL || '';
+const languages: Language[] = ['python', 'javascript', 'cpp'];
+
+async function getAccessToken() {
+  const supabase = getSupabaseBrowserClient();
+  if (!supabase) throw new Error('Supabase authentication is not configured in this environment.');
+  const { data: { session }, error } = await supabase.auth.getSession();
+  if (error || !session?.access_token) throw new Error('A valid user session is required for debugging.');
+  return session.access_token;
+}
 
 export default function DebuggingLabWorkspace() {
   const params = useParams();
   const problemId = params?.id as string;
-
-  const problem =
-    SAMPLE_PROBLEMS.find((p) => p.id === problemId && p.mode === 'debugging') ||
-    SAMPLE_PROBLEMS[2];
-
-  const [code, setCode] = useState(problem.starterCode.python);
+  const [problem, setProblem] = useState<ProblemRecord | null>(null);
+  const [sampleCases, setSampleCases] = useState<SampleCase[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [code, setCode] = useState('');
   const [language, setLanguage] = useState<'python' | 'javascript' | 'cpp'>('python');
   const [hypothesis, setHypothesis] = useState('');
-  const [revealedHintTier, setRevealedHintTier] = useState<number>(0);
+  const [hints, setHints] = useState<string[]>([]);
+  const [hintError, setHintError] = useState<string | null>(null);
+  const [hintLoading, setHintLoading] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
+  const [isRunningSample, setIsRunningSample] = useState(false);
   const [fixStatus, setFixStatus] = useState<'untested' | 'failed' | 'passed' | 'configuration_error'>('untested');
   const [diagnosticLog, setDiagnosticLog] = useState<string>('');
+  const [sampleOutput, setSampleOutput] = useState<string | null>(null);
+  const [sampleError, setSampleError] = useState<string | null>(null);
+  const supportedLanguages = useMemo(
+    () => (problem?.supported_languages || []).filter((item): item is Language =>
+      languages.includes(item as Language),
+    ),
+    [problem],
+  );
 
-  const scenario = problem.bugScenario || {
-    symptom: 'Time Limit Exceeded / Infinite Loop',
-    failingInput: 'nums = [2, 5], target = 5',
-    actualOutput: 'CPU Timeout (exceeded 2.0s)',
-    expectedOutput: '1',
-    buggyLinesHint: 'Check loop termination condition and pointer increments',
-    hintTiers: [
-      'Level 1: Notice what happens when `left` and `right` are adjacent.',
-      'Level 2: When `left = mid`, if `mid` equals `left`, the pointer never advances.',
-      'Level 3: Set `left = mid + 1` and change the loop condition to `while left <= right`.',
-    ],
-  };
+  useEffect(() => {
+    let active = true;
+    const loadChallenge = async () => {
+      setIsLoading(true);
+      setLoadError(null);
+      try {
+        if (!backendUrl) throw new Error('Set NEXT_PUBLIC_API_URL or NEXT_PUBLIC_BACKEND_URL to connect to the backend.');
+        const accessToken = await getAccessToken();
+        const headers = { Authorization: `Bearer ${accessToken}` };
+        const encodedId = encodeURIComponent(problemId);
+        const [problemResponse, samplesResponse] = await Promise.all([
+          fetch(`${backendUrl}/api/v1/platform/problems/${encodedId}`, { headers }),
+          fetch(`${backendUrl}/api/v1/platform/problems/${encodedId}/samples`, { headers }),
+        ]);
+        const problemBody = await problemResponse.json().catch(() => null);
+        const samplesBody = await samplesResponse.json().catch(() => null);
+        if (!problemResponse.ok) throw new Error(problemBody?.detail || 'Unable to load this challenge.');
+        if (!samplesResponse.ok) throw new Error(samplesBody?.detail || 'Unable to load public regression cases.');
+        if (!problemBody || !Array.isArray(samplesBody)) throw new Error('The server returned invalid challenge data.');
+        if (problemBody.problem_mode === 'normal') throw new Error('This problem is not a debugging challenge.');
+        if (active) {
+          const record = problemBody as ProblemRecord;
+          setProblem(record);
+          setSampleCases(samplesBody as SampleCase[]);
+          const initialLanguage = (record.supported_languages || []).find((item) =>
+            languages.includes(item as Language),
+          ) as Language | undefined;
+          if (!initialLanguage) {
+            setLoadError('This challenge does not have a supported execution language configured.');
+          } else {
+            setLanguage(initialLanguage);
+            setCode(record.starter_code?.[initialLanguage] || '');
+          }
+        }
+      } catch (error) {
+        if (active) setLoadError(error instanceof Error ? error.message : 'Unable to load the challenge.');
+      } finally {
+        if (active) setIsLoading(false);
+      }
+    };
+    void loadChallenge();
+    return () => { active = false; };
+  }, [problemId]);
 
-  const runDebugVerification = async () => {
-    const supabase = getSupabaseBrowserClient();
-    if (!supabase) {
-      throw new Error('Supabase is not configured. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.');
-    }
-
-    const {
-      data: { session },
-      error,
-    } = await supabase.auth.getSession();
-
-    if (error || !session?.access_token) {
-      throw new Error('A valid user session is required to verify the fix in the backend.');
-    }
-
-    const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-    const response = await fetch(`${backendUrl}/api/v1/platform/execute`, {
+  const fetchPlatformResult = async (endpoint: 'execute' | 'submit', payload: Record<string, unknown>) => {
+    if (!backendUrl) throw new Error('Set NEXT_PUBLIC_API_URL or NEXT_PUBLIC_BACKEND_URL to connect to the backend.');
+    const accessToken = await getAccessToken();
+    const response = await fetch(`${backendUrl}/api/v1/platform/${endpoint}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${session.access_token}`,
+        Authorization: `Bearer ${accessToken}`,
       },
-      body: JSON.stringify({
+      body: JSON.stringify(payload),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body?.detail || `Request failed with status ${response.status}.`);
+    return body;
+  };
+
+  const requestHint = async () => {
+    if (hintLoading || hints.length >= 4) return;
+    setHintLoading(true);
+    setHintError(null);
+    try {
+      const accessToken = await getAccessToken();
+      if (!backendUrl) throw new Error('Set NEXT_PUBLIC_API_URL or NEXT_PUBLIC_BACKEND_URL to connect to the backend.');
+      const nextTier = hints.length + 1;
+      const response = await fetch(
+        `${backendUrl}/api/v1/platform/problems/${encodeURIComponent(problemId)}/hints/${nextTier}`,
+        { headers: { Authorization: `Bearer ${accessToken}` } },
+      );
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body?.detail || 'Unable to load the next hint.');
+      if (typeof body.hint !== 'string') throw new Error('The server returned an invalid hint.');
+      setHints((current) => [...current, body.hint]);
+    } catch (error) {
+      setHintError(error instanceof Error ? error.message : 'Unable to load the next hint.');
+    } finally {
+      setHintLoading(false);
+    }
+  };
+
+  const runPublicSample = async () => {
+    const sample = sampleCases[0];
+    if (!sample) {
+      setSampleError('No public sample test case has been configured.');
+      return;
+    }
+    setIsRunningSample(true);
+    setSampleError(null);
+    setSampleOutput(null);
+    try {
+      const result = await fetchPlatformResult('execute', {
         language,
         source_code: code,
-        stdin: scenario.failingInput,
-      }),
-    });
-
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      throw new Error(data?.detail || `Verification failed with status ${response.status}.`);
+        stdin: sample.input_text,
+      });
+      if (result.status !== 'success') {
+        throw new Error(result.message || result.stderr || result.compile_output || 'Sample execution did not complete successfully.');
+      }
+      setSampleOutput(String(result.stdout || ''));
+    } catch (error) {
+      setSampleError(error instanceof Error ? error.message : 'Unable to run the public sample.');
+    } finally {
+      setIsRunningSample(false);
     }
-
-    return data;
   };
 
   const handleVerifyFix = async () => {
+    if (!problem) return;
     setIsVerifying(true);
     setFixStatus('untested');
     setDiagnosticLog('');
 
     try {
-      const result = await runDebugVerification();
-      const normalized = String(result.stdout || '').trim();
-      const expected = String(scenario.expectedOutput || '').trim();
-      const hasFixedPointer = code.includes('mid + 1') || code.includes('left <= right');
-      const passes = result.status === 'accepted' && normalized === expected;
-      if (result.status === 'unconfigured') {
+      const result = await fetchPlatformResult('submit', {
+        problem_id: problem.id,
+        language,
+        source_code: code,
+        mode: 'submit',
+      });
+      if (result.status === 'unconfigured' || result.status === 'configuration_error') {
         setFixStatus('configuration_error');
-        setDiagnosticLog('Judge0 is not configured. Add backend execution settings to run the regression suite.');
+        setDiagnosticLog(result.message || 'Judge0 is not configured, so the regression suite could not run.');
         return;
       }
 
-      if (passes || hasFixedPointer) {
+      if (result.status === 'accepted') {
         setFixStatus('passed');
-        setDiagnosticLog(`All 6 regression test suites passed! Output: ${normalized || 'No output'} • +25 Learning DNA Mastery.`);
+        setDiagnosticLog(`The backend verified ${result.passed_test_count} of ${result.total_test_count} configured regression cases.`);
       } else {
         setFixStatus('failed');
-        setDiagnosticLog(`Test failed on input: ${scenario.failingInput}. Actual output: ${normalized || '(no output)'} | Expected: ${expected}. Try Level 2 hint.`);
+        setDiagnosticLog(
+          `The submitted fix did not pass the regression suite (${result.passed_test_count} of ${result.total_test_count} cases passed). Hidden test details are withheld.`,
+        );
       }
     } catch (error) {
       setFixStatus('configuration_error');
@@ -118,6 +219,31 @@ export default function DebuggingLabWorkspace() {
       setIsVerifying(false);
     }
   };
+
+  if (isLoading) {
+    return (
+      <AppShell hideFooter>
+        <div className="flex min-h-[60vh] items-center justify-center gap-3 text-sm text-slate-300" role="status">
+          <span className="h-5 w-5 animate-spin rounded-full border-2 border-amber-400/30 border-t-amber-400" />
+          Loading debugging challenge from the database...
+        </div>
+      </AppShell>
+    );
+  }
+
+  if (!problem || loadError) {
+    return (
+      <AppShell hideFooter>
+        <div className="mx-auto mt-12 max-w-xl rounded-2xl border border-rose-500/30 bg-navy-900 p-6 text-center" role="alert">
+          <h1 className="text-lg font-bold text-white">Debugging challenge unavailable</h1>
+          <p className="mt-2 text-sm text-slate-300">{loadError || 'The requested challenge could not be loaded.'}</p>
+          <Link href="/problems" className="mt-5 inline-flex rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500">
+            Return to Problem Hub
+          </Link>
+        </div>
+      </AppShell>
+    );
+  }
 
   return (
     <AppShell hideFooter>
@@ -155,19 +281,22 @@ export default function DebuggingLabWorkspace() {
             </Link>
 
             <button
+              onClick={runPublicSample}
+              disabled={isVerifying || isRunningSample || sampleCases.length === 0}
+              className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-700 disabled:opacity-50"
+            >
+              <Terminal className="h-3.5 w-3.5" />
+              <span>{isRunningSample ? 'Running Sample...' : 'Run Sample'}</span>
+            </button>
+            <button
               onClick={handleVerifyFix}
-              disabled={isVerifying}
+              disabled={isVerifying || isRunningSample}
               className="flex items-center gap-1.5 rounded-lg bg-amber-600 px-4 py-1.5 text-xs font-bold text-white shadow-md hover:bg-amber-500 transition-colors disabled:opacity-50"
             >
               <CheckCircle2 className="h-3.5 w-3.5" />
               <span>{isVerifying ? 'Running Regression Suite...' : 'Verify Fix'}</span>
             </button>
           </div>
-        </div>
-
-        {/* Notice Banner */}
-        <div className="px-4 pt-2">
-          <SimulationBanner featureName="Debugging Lab Regression Engine" />
         </div>
 
         {/* Split Panels */}
@@ -184,23 +313,34 @@ export default function DebuggingLabWorkspace() {
               </p>
             </div>
 
-            {/* Bug Symptom Dossier Box */}
+            {/* Public test-case context */}
             <div className="rounded-xl border border-rose-500/30 bg-rose-950/20 p-4 space-y-2 text-xs">
               <div className="flex items-center gap-2 text-rose-400 font-bold">
                 <AlertTriangle className="h-4 w-4" />
-                <span>Observed Failure Symptom</span>
+                <span>Debugging Challenge</span>
               </div>
-              <p className="text-slate-200 font-semibold">{scenario.symptom}</p>
-              <div className="grid grid-cols-2 gap-2 pt-2 font-mono text-[11px]">
-                <div className="rounded bg-navy-950 p-2 border border-slate-800">
-                  <span className="text-slate-500 block text-[10px]">Failing Input:</span>
-                  <span className="text-slate-200">{scenario.failingInput}</span>
+              <p className="text-slate-200 font-semibold">Topic: {problem.category}</p>
+              {sampleCases.length === 0 ? (
+                <p className="pt-2 text-amber-200">No public regression cases are configured for this challenge.</p>
+              ) : (
+                <div className="space-y-2 pt-2 font-mono text-[11px]">
+                  {sampleCases.map((sample, index) => (
+                    <div key={sample.id} className="rounded bg-navy-950 p-2 border border-slate-800">
+                      <span className="text-slate-500 block text-[10px]">Public case {index + 1} input:</span>
+                      <pre className="whitespace-pre-wrap text-slate-200">{sample.input_text}</pre>
+                      <span className="mt-2 text-slate-500 block text-[10px]">Expected output:</span>
+                      <pre className="whitespace-pre-wrap text-emerald-300">{sample.expected_output}</pre>
+                    </div>
+                  ))}
                 </div>
-                <div className="rounded bg-navy-950 p-2 border border-slate-800">
-                  <span className="text-slate-500 block text-[10px]">Actual Result:</span>
-                  <span className="text-rose-400">{scenario.actualOutput}</span>
+              )}
+              {sampleOutput !== null && (
+                <div className="rounded bg-navy-950 p-2 border border-slate-800 font-mono text-[11px]">
+                  <span className="text-slate-500 block text-[10px]">Actual output from Judge0:</span>
+                  <pre className="whitespace-pre-wrap text-slate-200">{sampleOutput || '(no output)'}</pre>
                 </div>
-              </div>
+              )}
+              {sampleError && <p className="text-rose-200" role="alert">{sampleError}</p>}
             </div>
 
             {/* Socratic Hint Tiers Drawer */}
@@ -211,40 +351,25 @@ export default function DebuggingLabWorkspace() {
                   <span>Socratic Progressive Hints</span>
                 </div>
                 <span className="text-[11px] text-slate-400">
-                  Revealed: {revealedHintTier} of {scenario.hintTiers.length}
+                  Revealed: {hints.length} of 4
                 </span>
               </div>
 
               <div className="space-y-2">
-                {scenario.hintTiers.map((hint, i) => {
-                  const isRevealed = revealedHintTier > i;
-                  return (
-                    <div
-                      key={i}
-                      className={`rounded-lg border p-2.5 text-xs transition-all ${
-                        isRevealed
-                          ? 'border-teal-500/30 bg-teal-950/20 text-slate-200'
-                          : 'border-slate-800 bg-navy-900/40 text-slate-500'
-                      }`}
-                    >
-                      {isRevealed ? (
-                        <span>{hint}</span>
-                      ) : (
-                        <div className="flex items-center justify-between">
-                          <span>Hint Tier {i + 1} (Locked)</span>
-                          {i === revealedHintTier && (
-                            <button
-                              onClick={() => setRevealedHintTier(revealedHintTier + 1)}
-                              className="text-[11px] font-semibold text-teal-400 hover:text-teal-300 underline"
-                            >
-                              Unlock Tier {i + 1}
-                            </button>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+                {hints.map((hint, index) => (
+                  <div key={index} className="rounded-lg border border-teal-500/30 bg-teal-950/20 p-2.5 text-xs text-slate-200">
+                    <span className="mb-1 block text-[10px] font-bold uppercase text-teal-300">Hint Tier {index + 1}</span>
+                    {hint}
+                  </div>
+                ))}
+                {hintError && <p className="text-xs text-rose-300" role="alert">{hintError}</p>}
+                <button
+                  onClick={() => void requestHint()}
+                  disabled={hintLoading || hints.length >= 4}
+                  className="text-[11px] font-semibold text-teal-400 underline hover:text-teal-300 disabled:opacity-50"
+                >
+                  {hintLoading ? 'Loading hint...' : hints.length >= 4 ? 'All hint tiers requested' : `Request Hint Tier ${hints.length + 1}`}
+                </button>
               </div>
             </div>
 
@@ -252,17 +377,17 @@ export default function DebuggingLabWorkspace() {
             <div className="rounded-xl border border-slate-800 bg-navy-950/80 p-4 space-y-2 text-xs">
               <label className="font-bold text-white flex items-center gap-1.5">
                 <HelpCircle className="h-3.5 w-3.5 text-indigo-400" />
-                <span>Formulate Your Bug Diagnosis Hypothesis:</span>
+                <span>Write Your Bug Diagnosis Hypothesis:</span>
               </label>
               <textarea
                 rows={2}
-                placeholder="e.g. When left == mid and target > nums[mid], assigning left = mid prevents loop convergence..."
+                placeholder="Describe the suspected cause and how you would test it..."
                 value={hypothesis}
                 onChange={(e) => setHypothesis(e.target.value)}
                 className="w-full rounded-lg border border-slate-700 bg-navy-900 p-2 text-xs text-white placeholder-slate-500 outline-none focus:border-indigo-500"
               />
               <span className="text-[10px] text-slate-500">
-                Reflecting on the root cause trains your mental model and updates your Learning DNA.
+                Use this space for your own notes; they are not saved or scored.
               </span>
             </div>
           </div>
@@ -273,7 +398,7 @@ export default function DebuggingLabWorkspace() {
               <CodeEditor
                 initialCode={code}
                 language={language}
-                highlightLines={[7, 10]}
+                supportedLanguages={supportedLanguages}
                 onCodeChange={(newCode) => setCode(newCode)}
                 onLanguageChange={(nextLanguage) => setLanguage(nextLanguage)}
                 height="320px"
@@ -309,13 +434,13 @@ export default function DebuggingLabWorkspace() {
                 {isVerifying ? (
                   <div className="flex items-center justify-center h-full gap-2 text-amber-400">
                     <span className="h-4 w-4 rounded-full border-2 border-amber-400/30 border-t-amber-400 animate-spin"></span>
-                    <span>Running edge-case test suites in sandbox...</span>
+                    <span>Running configured regression cases in Judge0...</span>
                   </div>
                 ) : fixStatus === 'passed' ? (
                   <div className="space-y-3">
                     <div className="flex items-center gap-2 text-emerald-400 font-bold">
                       <CheckCircle2 className="h-5 w-5" />
-                      <span>Fix Verified! All Edge Cases Pass.</span>
+                      <span>Fix Verified! Configured Regression Cases Passed.</span>
                     </div>
                     <p className="text-slate-300 font-sans text-xs">{diagnosticLog}</p>
                     <div className="mt-3 flex items-center gap-3 font-sans">
@@ -324,7 +449,7 @@ export default function DebuggingLabWorkspace() {
                         className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-indigo-500 transition-colors flex items-center gap-1.5"
                       >
                         <Dna className="h-3.5 w-3.5" />
-                        <span>Inspect DNA Update</span>
+                        <span>View Learning DNA</span>
                       </Link>
                       <Link
                         href="/problems"
@@ -354,7 +479,7 @@ export default function DebuggingLabWorkspace() {
                   <div className="text-slate-400 text-xs font-sans space-y-1">
                     <p className="font-semibold text-slate-300">Ready to test your patch.</p>
                     <p className="text-[11px] text-slate-500">
-                      Edit the code in the editor above to correct lines 7 & 10 (advance left with `mid + 1` and loop `while left &lt;= right`), then click <strong className="text-amber-400">Verify Fix</strong>.
+                      Edit the challenge code, run a public sample if needed, then submit your fix for backend regression testing.
                     </p>
                   </div>
                 )}

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Path, status
 
 from backend.app.core.ai_mentor import (
     MentorConfigurationError,
@@ -73,7 +73,16 @@ async def platform_status(current_user: UserProfile = Depends(get_current_user))
 async def list_profiles(current_user: UserProfile = Depends(get_current_user)):
     database = get_database_service()
     if current_user.role == UserRole.STUDENT:
-        return [database.get_user_profile(current_user.id)] if database.get_user_profile(current_user.id) else []
+        try:
+            profile = database.get_user_profile(current_user.id)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+        return [profile] if profile else []
+    if current_user.role == UserRole.TEACHER:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Teacher profile access requires an authorized course scope.",
+        )
     try:
         profiles = database.list_profiles(limit=50)
     except RuntimeError as exc:
@@ -85,6 +94,11 @@ async def list_profiles(current_user: UserProfile = Depends(get_current_user)):
 async def get_profile(user_id: str, current_user: UserProfile = Depends(get_current_user)):
     if current_user.role == UserRole.STUDENT and current_user.id != user_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Students can only read their own profile.")
+    if current_user.role == UserRole.TEACHER:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Teacher profile access requires an authorized course scope.",
+        )
     database = get_database_service()
     try:
         profile = database.get_user_profile(user_id)
@@ -122,6 +136,55 @@ async def get_problem_record(problem_id: str, current_user: UserProfile = Depend
     return {key: value for key, value in problem.items() if key in PUBLIC_PROBLEM_FIELDS}
 
 
+@router.get("/problems/{problem_id}/samples")
+async def list_public_problem_samples(problem_id: str, current_user: UserProfile = Depends(require_student)):
+    database = get_database_service()
+    try:
+        problem = database.get_problem(problem_id)
+        if not problem:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Problem not found.")
+        if problem.get("is_published") is False and current_user.role == UserRole.STUDENT:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Hidden problems are not available to students.")
+        return database.list_public_problem_test_cases(problem_id, limit=10)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+
+
+@router.get("/problems/{problem_id}/hints/{tier}")
+async def get_progressive_problem_hint(
+    problem_id: str,
+    tier: int = Path(ge=1, le=4),
+    current_user: UserProfile = Depends(require_student),
+):
+    database = get_database_service()
+    try:
+        problem = database.get_problem(problem_id)
+        if not problem:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Problem not found.")
+        if problem.get("is_published") is False and current_user.role == UserRole.STUDENT:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Hidden problems are not available to students.")
+        if problem.get("problem_mode") not in {"debugging", "both"}:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This problem has no debugging hints.")
+        requested_tiers = database.list_problem_hint_progress(current_user.id, problem_id)
+        next_tier = next((candidate for candidate in range(1, 5) if candidate not in requested_tiers), 5)
+        if tier not in requested_tiers and tier != next_tier:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Request the previous hint tier before continuing.",
+            )
+        hints = database.list_problem_hints(problem_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    if len(hints) < tier:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="This hint is not configured.")
+    if tier not in requested_tiers:
+        try:
+            database.record_problem_hint_tier(current_user.id, problem_id, tier)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    return {"tier": tier, "hint": hints[tier - 1]}
+
+
 @router.get("/courses")
 async def list_courses(current_user: UserProfile = Depends(require_student)):
     database = get_database_service()
@@ -155,6 +218,11 @@ async def list_submissions(current_user: UserProfile = Depends(require_student))
                 for submission in submissions
                 if submission.get("user_id") == current_user.id
             ]
+        if current_user.role == UserRole.TEACHER:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Teacher submission access requires an authorized course scope.",
+            )
         return database.list_submissions(limit=20)
     except RuntimeError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
@@ -188,9 +256,18 @@ async def submit_code(payload: SubmissionRequest, current_user: UserProfile = De
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Problem not found.")
     if problem and problem.get("is_published") is False and current_user.role == UserRole.STUDENT:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Hidden problems are not available to students.")
+    supported_languages = problem.get("supported_languages") if problem else None
+    if supported_languages and payload.language not in supported_languages:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="This problem does not support the selected programming language.",
+        )
 
-    if current_user.role == UserRole.STUDENT and any(test_case.is_hidden for test_case in payload.test_cases):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Hidden tests are never accepted from clients.")
+    if payload.mode != "submit":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Use the execution endpoint for run mode; this endpoint grades submissions.",
+        )
     try:
         stored_cases = database.list_problem_test_cases(
             payload.problem_id,

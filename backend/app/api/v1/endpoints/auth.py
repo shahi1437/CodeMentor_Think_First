@@ -88,7 +88,15 @@ async def assign_user_role(
             detail="Safety guardrail: Admins cannot demote their own account from the API.",
         )
 
-    updated_role = set_user_role(payload.user_id, payload.target_role)
+    try:
+        updated_role = set_user_role(payload.user_id, payload.target_role)
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="The role change could not be persisted. Verify Supabase configuration and availability.",
+        ) from exc
 
     return RoleUpdateResponse(
         success=True,

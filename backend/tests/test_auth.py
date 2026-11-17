@@ -3,6 +3,7 @@ import jwt
 from fastapi.testclient import TestClient
 
 from backend.app.core.config import settings
+from backend.app.core import role_store
 from backend.app.main import app
 
 client = TestClient(app)
@@ -10,6 +11,8 @@ client = TestClient(app)
 
 def create_test_token(sub: str, email: str, role: str, expires_in: int = 3600) -> str:
     """Helper to generate signed Supabase-style JWT for tests"""
+    if role_store.get_user_role(sub) is None:
+        role_store.set_user_role(sub, role)
     payload = {
         "sub": sub,
         "email": email,

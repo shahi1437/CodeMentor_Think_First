@@ -4,6 +4,7 @@ from fastapi import HTTPException
 from backend.app.api.v1.endpoints.platform import get_profile
 from backend.app.core.config import settings
 from backend.app.core.database import DatabaseService
+from backend.app.core.role_store import InactiveAccountError, SupabaseRoleRepository
 from backend.app.schemas.auth import UserProfile, UserRole
 
 
@@ -20,11 +21,11 @@ class FakeTable:
         self.selected_columns = None
 
     def select(self, *args, **_kwargs):
-        self.filters = []
-        self.single = False
-        self.limit_value = None
-        self.order_value = None
-        self.method = None
+        if self.method is None:
+            self.filters = []
+            self.single = False
+            self.limit_value = None
+            self.order_value = None
         selected = args[0] if args else "*"
         self.selected_columns = None if selected == "*" else [column.strip() for column in selected.split(",")]
         return self
@@ -168,6 +169,59 @@ def test_database_service_persists_profile_role_changes():
     assert service.get_user_profile("user-1")["role"] == "teacher"
 
 
+def test_supabase_role_repository_updates_existing_profile_and_confirms_write(monkeypatch):
+    monkeypatch.setattr(settings, "SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setattr(settings, "SUPABASE_SERVICE_ROLE_KEY", "test-service-role-key")
+    client = FakeSupabaseClient({
+        "profiles": [{"id": "user-1", "email": "student@example.com", "role": "student"}],
+    })
+    repository = SupabaseRoleRepository(client=client)
+
+    assert repository.set_user_role("user-1", "teacher").value == "teacher"
+    assert repository.get_user_role("user-1").value == "teacher"
+
+
+def test_supabase_role_repository_does_not_create_missing_profiles(monkeypatch):
+    monkeypatch.setattr(settings, "SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setattr(settings, "SUPABASE_SERVICE_ROLE_KEY", "test-service-role-key")
+    repository = SupabaseRoleRepository(client=FakeSupabaseClient({"profiles": []}))
+
+    with pytest.raises(LookupError, match="User profile not found"):
+        repository.set_user_role("missing-user", "admin")
+
+
+def test_supabase_role_repository_rejects_inactive_accounts(monkeypatch):
+    monkeypatch.setattr(settings, "SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setattr(settings, "SUPABASE_SERVICE_ROLE_KEY", "test-service-role-key")
+    repository = SupabaseRoleRepository(client=FakeSupabaseClient({
+        "profiles": [{"id": "disabled-user", "role": "admin", "is_active": False}],
+    }))
+
+    with pytest.raises(InactiveAccountError):
+        repository.get_user_role("disabled-user")
+
+
+def test_database_service_does_not_fake_success_when_write_is_not_confirmed():
+    class NoResultTable:
+        def insert(self, _payload):
+            return self
+
+        def select(self, _columns):
+            return self
+
+        def execute(self):
+            return type("Response", (), {"data": []})()
+
+    class NoResultClient:
+        def table(self, _name):
+            return NoResultTable()
+
+    service = DatabaseService(client=NoResultClient())
+
+    with pytest.raises(RuntimeError, match="did not confirm the persisted submission"):
+        service.create_submission({"user_id": "user-1", "source_code": "print(1)"})
+
+
 def test_problem_queries_do_not_select_hidden_test_cases():
     client = FakeSupabaseClient({
         "problems": [{
@@ -217,6 +271,26 @@ def test_database_service_reads_test_cases_only_for_requested_problem():
         "expected_output": "private-result",
         "is_hidden": True,
     }]
+
+
+def test_database_service_public_problem_samples_exclude_hidden_cases():
+    client = FakeSupabaseClient({
+        "problem_test_cases": [
+            {"id": "sample", "problem_id": "problem-1", "name": "Sample", "input_text": "public", "expected_output": "ok", "is_hidden": False},
+            {"id": "hidden", "problem_id": "problem-1", "name": "Hidden", "input_text": "private", "expected_output": "secret", "is_hidden": True},
+        ],
+    })
+    service = DatabaseService(client=client)
+
+    samples = service.list_public_problem_test_cases("problem-1")
+
+    assert samples == [{
+        "id": "sample",
+        "name": "Sample",
+        "input_text": "public",
+        "expected_output": "ok",
+    }]
+    assert "private" not in str(samples)
 
 
 def test_database_service_reads_persisted_learning_dna_profile():
