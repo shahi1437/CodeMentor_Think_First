@@ -5,6 +5,7 @@ from backend.app.core.auth import (
     require_student,
     require_teacher,
 )
+from backend.app.core.role_store import set_user_role
 from backend.app.schemas.auth import (
     RoleUpdateRequest,
     RoleUpdateResponse,
@@ -74,16 +75,24 @@ async def assign_user_role(
     Crucial Security Rule: Regular users and teachers CANNOT call this endpoint.
     Admin roles can never be self-assigned in the client signup.
     """
-    # Prevent admin from accidentally demoting themselves if modifying own id
+    if current_admin.role != UserRole.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied: administrative privileges are required to change user roles.",
+        )
+
+    # Prevent admin from accidentally demoting themselves if modifying own id.
     if payload.user_id == current_admin.id and payload.target_role != UserRole.ADMIN:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Safety guardrail: Admins cannot demote their own account from the API.",
         )
 
+    updated_role = set_user_role(payload.user_id, payload.target_role)
+
     return RoleUpdateResponse(
         success=True,
         user_id=payload.user_id,
-        new_role=payload.target_role,
-        message=f"Role for user {payload.user_id} successfully updated to '{payload.target_role.value}'.",
+        new_role=updated_role,
+        message=f"Role for user {payload.user_id} successfully updated to '{updated_role.value}'.",
     )

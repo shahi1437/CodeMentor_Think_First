@@ -4,6 +4,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from backend.app.core.config import settings
+from backend.app.core.role_store import get_user_role
 from backend.app.schemas.auth import TokenPayload, UserProfile, UserRole
 
 # Bearer token extractor
@@ -48,13 +49,13 @@ def decode_jwt_token(token: str) -> TokenPayload:
     user_meta = payload.get("user_metadata", {}) or {}
     app_meta = payload.get("app_metadata", {}) or {}
 
-    # Role resolution order: app_metadata -> user_metadata -> direct claim -> default 'student'
+    stored_role = get_user_role(sub)
+
+    # Resolve the authoritative role using the backend role registry first; fall back
+    # to token metadata when no persisted value exists.
     raw_role = (
-        app_meta.get("role")
-        or user_meta.get("role")
-        or payload.get("role")
-        or "student"
-    )
+        stored_role.value if stored_role is not None else None
+    ) or app_meta.get("role") or user_meta.get("role") or payload.get("role") or "student"
 
     try:
         resolved_role = UserRole(raw_role)

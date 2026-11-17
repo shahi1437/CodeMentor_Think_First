@@ -40,3 +40,5 @@ yarn-error.log*
 thumbs.db
 .env.*
 !.env.example
+# TypeScript build cache
+*.tsbuildinfo
