@@ -146,6 +146,7 @@ export default function VisualCodeAnalyzerPage() {
             </div>
 
             <CodeEditor
+              key={selectedPreset}
               initialCode={currentPresetData.code}
               language="python"
               height="360px"

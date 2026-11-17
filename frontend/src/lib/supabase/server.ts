@@ -13,11 +13,11 @@ const getConfiguredSupabaseClient = () => {
   return { supabaseUrl, supabaseAnonKey };
 };
 
-export function getSupabaseServerClient() {
+export async function getSupabaseServerClient() {
   const config = getConfiguredSupabaseClient();
   if (!config) return null;
 
-  const cookieStore = cookies();
+  const cookieStore = await cookies();
   const { supabaseUrl, supabaseAnonKey } = config;
 
   return createServerClient(supabaseUrl, supabaseAnonKey, {

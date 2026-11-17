@@ -62,21 +62,26 @@ Status definitions: **Implemented** means source exists; **Tested** means the re
 
 - [x] Learning DNA is aggregated from authenticated persisted submission history.
 - [x] First-time learner and loading/error states are implemented.
-- [ ] Replace remaining student/teacher mock dashboard metrics with authorized backend data.
-- [x] Replace administrator mock metrics with an admin-only database-count endpoint; teacher analytics remain explicitly unavailable pending scope-safe data.
-- [ ] Verify teacher/student data boundaries with tests and live RLS.
+- [x] Replace student dashboard mock metrics with authenticated Learning DNA, submission, and plan data.
+- [x] Persist daily-plan task completion through an owner-scoped API.
+- [x] Replace teacher cohort mock data with owned course and active-enrollment summaries.
+- [x] Replace administrator mock metrics with an admin-only database-count endpoint.
+- [ ] Implement student-level teacher analytics only after course/problem assignment scope is established.
+- [ ] Verify teacher/student data boundaries with isolated accounts and live RLS.
 - [ ] Add a problem-to-course assignment relationship before enabling teacher submission access.
 
 ## Quality and delivery
 
 - [x] Add GitHub Actions checks for backend tests, frontend type/build checks, and unique migration versions.
-- [ ] Verify CI results on the pushed feature branch.
-- [x] Re-run the full backend suite after admin metrics changes: 74 passed, 2 deprecation warnings.
+- [x] Verify hosted CI results on PR #8: backend, frontend, and migrations passed.
+- [x] Re-run the full backend suite after dashboard and plan changes: 80 passed, 2 deprecation warnings.
 - [x] Frontend ESLint, TypeScript check, and production build pass.
-- [x] Re-run the frontend production build after the latest workspace/filter changes.
+- [x] Re-run the frontend production build after the latest history, admin, and dashboard changes.
 - [ ] Complete repository-wide historical secret and security review.
-- [ ] Resolve the critical Next.js production dependency advisory; the available fix is a major-version upgrade and needs review.
+- [x] Upgrade Next.js to 16.4.6 and clear production dependency advisories.
+- [ ] Resolve remaining development dependency advisories; the available Tailwind fix is a major-version upgrade and needs review.
 - [x] Final backend tests, frontend build, and staged/unstaged whitespace checks pass after the latest edits.
-- [x] Staged and unstaged diffs contain no detected real `.env` files or common credential/token patterns.
+- [x] No real `.env` files were changed; repository-wide historical secret scanning remains pending.
 - [x] Review the current staged and unstaged implementation diffs; live service checks remain pending configuration.
-- [x] Review staged changes and push only to the development branch after validation.
+- [x] Commit reviewed changes and push only to the dedicated feature branch.
+- [x] Open PR #8 against `main` without merging.

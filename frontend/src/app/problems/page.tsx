@@ -39,8 +39,6 @@ export default function ProblemHubPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const loadProblems = useCallback(async () => {
-    setIsLoading(true);
-    setLoadError(null);
     try {
       const supabase = getSupabaseBrowserClient();
       if (!supabase) {
@@ -71,8 +69,14 @@ export default function ProblemHubPage() {
   }, []);
 
   useEffect(() => {
-    void loadProblems();
+    void Promise.resolve().then(loadProblems);
   }, [loadProblems]);
+
+  const refreshProblems = () => {
+    setIsLoading(true);
+    setLoadError(null);
+    void loadProblems();
+  };
 
   const categories = useMemo(
     () => Array.from(new Set(problems.map((problem) => problem.category))),
@@ -130,14 +134,6 @@ export default function ProblemHubPage() {
             </p>
           </div>
 
-          <div className="flex items-center gap-2">
-            <Link
-              href="/admin/problems/new"
-              className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-navy-900 px-3 py-1.5 text-xs font-semibold text-slate-300 hover:bg-slate-800 hover:text-white transition-colors"
-            >
-              <span>+ Propose Challenge</span>
-            </Link>
-          </div>
         </div>
 
         {/* Filter Toolbar */}
@@ -245,7 +241,7 @@ export default function ProblemHubPage() {
               <h3 className="text-base font-bold text-white">Problem catalog unavailable</h3>
               <p className="mt-2 text-sm text-slate-300">{loadError}</p>
               <button
-                onClick={() => void loadProblems()}
+                onClick={refreshProblems}
                 className="mt-4 rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-500"
               >
                 Try again

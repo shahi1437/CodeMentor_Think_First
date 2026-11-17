@@ -3,10 +3,11 @@
 ## Verified repository state
 
 - Repository: `shahi1437/CodeMentor_Think_First`
-- Branch: `main`
-- Base commit for the current milestone: `c5a8cdad781153077a2f80c7d3d2f14d3789a447`.
-- The locally validated milestone has been committed and pushed to `full-platform-completion`; preserve the branch history.
-- Latest complete checks: backend `74 passed` (two deprecation warnings); frontend TypeScript check and production build passed.
+- Branch: `feature/complete-production-launch`
+- Base commit: `dd67f0b` (merged PR #7, based on `origin/main`).
+- PR #8 is open against `main` and has not been merged.
+- Latest complete checks: backend `80 passed` (two deprecation warnings); frontend lint, TypeScript check, and production build passed.
+- Hosted PR #8 backend, frontend, and migration checks passed on commit `4508771`.
 - No authenticated app-level Supabase, Judge0, or LLM-provider request was verified.
 
 ## Supabase production check (2026-11-18)
@@ -45,14 +46,16 @@
   binds mentor messages to the user's own conversation and verified role. It
   has not been applied to production and requires review, isolated RLS tests,
   and explicit approval before deployment.
+- The latest read-only migration listing confirms the five baseline versions
+  are recorded remotely and `20261121000100` is pending. No production
+  migration or SQL change was run for this milestone.
 - GitHub Actions now checks backend tests, frontend lint/type/build, and migration
   version uniqueness. The hosted workflow has not yet run.
-- Frontend dependency audit found one critical production Next.js advisory
-  (`npm audit --omit=dev`) and 17 additional development-dependency findings.
-  Safe compatible overrides fixed the vulnerable DOMPurify/PostCSS production
-  transitive packages; the remaining production fix requires a major upgrade
-  to Next.js 16.4.6. Do not force-upgrade Next/Tailwind without reviewing the
-  breaking change and rerunning the full regression suite.
+- Frontend now uses Next.js 16.4.6 / React 19.3.1 and CI Node 22.
+  `npm audit --omit=dev` reports zero production vulnerabilities. The full
+  audit reports 21 development dependency findings (3 moderate, 18 high),
+  primarily in the Tailwind 3 / lint toolchain. Do not force-upgrade Tailwind
+  without reviewing and testing that breaking change.
 - The schema has no problem-to-course assignment relationship. Therefore the
   migration deliberately grants teachers no direct submission reads; those
   remain blocked until a safe assignment scope is designed.
@@ -79,27 +82,27 @@
 4. Hidden test protection now has API projection tests, an additive column-grant migration for `problems.hidden_test_cases`, and server-side submission grading from `problem_test_cases`. Remote catalog grants/policies block student access; no authenticated-client test was run.
 5. Student submission history returns safe summary fields only; legacy runtime metadata and outputs are excluded to avoid exposing previously stored test data.
 6. Problem Hub and coding/debugging workspaces now use authenticated database-backed problem and public-sample APIs; debugging hints are returned one tier at a time and hint progression is stored per student/problem.
-7. Student/teacher dashboards and daily-plan pages still contain mock data. The admin dashboard now uses database-backed counts; its live database connection remains unverified.
+7. Student dashboard, daily-plan, and submission-history pages now use persisted, authenticated API data. History excludes source code and test outputs. The teacher page shows only owned course metadata and active enrollment counts; student-level analytics remain incomplete. The admin dashboard uses database-backed counts. Live database connectivity remains unverified.
 8. The ML classifier has a small in-code example set and heuristics; no independently verified real dataset or model evaluation was found.
 9. `knowledge_chunks` and mentor tables exist, but no verified pgvector retrieval path was found during this audit.
 10. Service credentials and live Supabase/Judge0/LLM behavior remain unverified.
+11. The administrator problem list now reads real database records. Create/edit/publish and debugging-variant verification remain unavailable; prior simulated success actions were removed.
 
 ## Latest milestone and verification
 
-- Full backend test suite: 74 passed; frontend TypeScript check and production build passed.
+- Full backend test suite: 80 passed; frontend lint, TypeScript check, and production build passed.
 - Backend tests cover hidden-case projection, database-owned grading, role verification, and tiered-hint privacy. The five baseline migrations are recorded in production; the new security migration remains unapplied.
-- Frontend production build passed before the final documentation and small UI refinements.
+- Frontend production build passed after the latest UI changes and dependency audit fix.
 - Submission status values were normalized to the existing database constraint; no status migration was needed.
 
 ## Next actions
 
 1. Review and test `20261121000100_scope_course_data_rls.sql` with isolated student/teacher/admin accounts, then obtain explicit production approval before applying it.
 2. Configure backend credentials privately and run authenticated Supabase/Judge0/LLM integration checks.
-3. Implement database-backed admin problem CRUD, publication validation, adaptive selection, and a shared execution rate limiter.
+3. Implement safe database-backed admin problem CRUD, publication validation, adaptive selection, and a shared execution rate limiter.
 4. Persist mentor conversations/messages and add knowledge retrieval only when vector/provider configuration is available.
-5. Replace remaining student/teacher dashboard and daily-plan mock data with authorized API data.
-6. Continue from the current `main` worktree; verify branch and commit status before delivery.
-7. Review and approve the major frontend framework upgrade needed to clear the remaining critical dependency advisory.
+5. Add teacher analytics only after a problem-to-course relationship and isolated authorization tests exist.
+6. Verify PR #8 hosted checks; do not merge without explicit approval.
 
 ## Configuration and live verification
 

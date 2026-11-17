@@ -9,7 +9,6 @@ import {
   Users,
   Layers,
   Activity,
-  PlusCircle,
   RefreshCw,
 } from 'lucide-react';
 import { AppShell } from '@/components/layout/AppShell';
@@ -54,9 +53,6 @@ export default function AdminDashboardPage() {
   const [error, setError] = useState<string | null>(null);
 
   const loadSummary = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-
     try {
       const supabase = getSupabaseBrowserClient();
       if (!supabase) {
@@ -95,8 +91,14 @@ export default function AdminDashboardPage() {
   }, []);
 
   useEffect(() => {
-    void loadSummary();
+    void Promise.resolve().then(loadSummary);
   }, [loadSummary]);
+
+  const refreshSummary = () => {
+    setIsLoading(true);
+    setError(null);
+    void loadSummary();
+  };
 
   return (
     <AppShell>
@@ -117,7 +119,7 @@ export default function AdminDashboardPage() {
 
           <div className="flex items-center gap-3">
             <button
-              onClick={() => void loadSummary()}
+              onClick={refreshSummary}
               disabled={isLoading}
               className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-navy-900 px-3 py-1.5 text-xs font-medium text-slate-300 hover:bg-slate-800 transition-colors"
             >
@@ -125,11 +127,11 @@ export default function AdminDashboardPage() {
               <span>Refresh Metrics</span>
             </button>
             <Link
-              href="/admin/problems/new"
+              href="/admin/problems"
               className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-1.5 text-xs font-bold text-white shadow-md hover:bg-indigo-500 transition-colors"
             >
-              <PlusCircle className="h-4 w-4" />
-              <span>New Problem Studio</span>
+              <Layers className="h-4 w-4" />
+              <span>Problem Bank</span>
             </Link>
           </div>
         </div>
@@ -221,17 +223,10 @@ export default function AdminDashboardPage() {
           <div className="rounded-2xl border border-slate-800 bg-navy-900/60 p-6 backdrop-blur-md space-y-5">
             <h3 className="text-sm font-bold text-white">Problem Bank Management</h3>
             <p className="text-xs text-slate-400">
-              Create and review problem records using the existing administrative screens.
+              Review persisted problem records. Authoring and publishing are not yet available.
             </p>
 
             <div className="grid grid-cols-1 gap-3 pt-1">
-              <Link
-                href="/admin/problems/new"
-                className="flex items-center gap-2 rounded-xl border border-indigo-500/30 bg-indigo-600/20 p-3.5 text-xs font-semibold text-indigo-300 hover:bg-indigo-600/30 transition-colors"
-              >
-                <PlusCircle className="h-4 w-4" />
-                <span>Author Problem Variant</span>
-              </Link>
               <Link
                 href="/admin/problems"
                 className="flex items-center gap-2 rounded-xl border border-slate-700 bg-navy-950 p-3.5 text-xs font-semibold text-slate-300 hover:bg-slate-800 transition-colors"

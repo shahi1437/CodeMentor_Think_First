@@ -86,13 +86,15 @@ The backend sends bounded CPU, wall-clock, memory, and output limits with each r
 
 The Problem Hub and coding/debugging workspaces read published problems and public sample cases from the authenticated FastAPI API. Hidden test cases remain server-side and are used only by the grading endpoint. Debugging hints are requested one tier at a time through the backend. The catalog is empty until real problems and test cases are added to Supabase; the app does not seed fake challenges.
 
-Problem metadata includes `problem_mode` (`normal`, `debugging`, or `both`), `tags`, `supported_languages`, and `progressive_hints`. The current admin challenge screens do not yet provide complete database-backed create/edit/publish workflows; add and validate records through a trusted administrative process until those screens are implemented.
+Problem metadata includes `problem_mode` (`normal`, `debugging`, or `both`), `tags`, `supported_languages`, and `progressive_hints`. The administrator problem list reads real records, but create/edit/publish and debugging-variant verification are not implemented. The UI does not simulate saving or validation; use a trusted administrative process until the backend authoring and test-harness workflow is ready.
 Hint unlock progress is stored per student/problem in `problem_hint_progress`; higher tiers cannot be requested before prior tiers have been unlocked.
 
-The administrator dashboard uses an admin-only backend endpoint for persisted
-database counts. External provider labels show configuration only, not service
-health. Teacher analytics are unavailable until course-scoped data can be
-retrieved and verified safely.
+The student dashboard, daily-plan page, and submission history use authenticated backend APIs for
+persisted learning, submission, and task data. The teacher page shows courses
+owned by the signed-in teacher and exact active enrollment counts; it does not
+claim student-level analytics or hint delivery. The administrator dashboard
+uses an admin-only backend endpoint for persisted database counts. External
+provider labels show configuration only, not service health.
 
 ## Configure the AI Mentor
 
@@ -156,8 +158,13 @@ For frontend production validation, run `cd frontend` and `npm run build`. For t
 
 GitHub Actions runs the backend suite, frontend lint/type/build checks, and
 verifies that Supabase migration versions are unique. It does not deploy
-services or apply database migrations.
+services or apply database migrations. The frontend uses Next.js 16.4.6 and
+React 19; CI uses Node 22. `npm audit --omit=dev` reports zero production
+vulnerabilities. The full audit still reports 21 development dependency
+findings (3 moderate, 18 high), mainly in the Tailwind/lint toolchain; no
+breaking Tailwind upgrade was applied.
 
-The current production dependency audit still reports one critical Next.js
-advisory. The available fix requires a major Next.js upgrade; do not treat this
-repository as production-ready until that upgrade is reviewed and validated.
+The latest read-only Supabase migration listing confirms the five baseline
+migrations are recorded and `20261121000100_scope_course_data_rls.sql` is
+pending. Do not push or repair that production migration until isolated
+role-based RLS tests pass and explicit production approval is obtained.
