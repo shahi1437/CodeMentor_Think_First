@@ -1,33 +1,76 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import {
-  Code2,
   Bug,
-  Sparkles,
-  Dna,
   Calendar,
-  History,
-  GraduationCap,
-  ShieldCheck,
-  Menu,
-  X,
-  Flame,
-  Search,
-  Bell,
   ChevronDown,
+  Code2,
+  Dna,
+  Flame,
+  GraduationCap,
+  History,
   Layers,
+  Menu,
+  ShieldCheck,
+  Sparkles,
   Terminal,
+  X,
 } from 'lucide-react';
+import { clearStoredSession, normalizeRole } from '@/lib/auth';
+import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import { Role } from '@/types';
 
 export const Navbar: React.FC = () => {
   const pathname = usePathname();
+  const router = useRouter();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [currentRole, setCurrentRole] = useState<Role>('student');
   const [roleDropdownOpen, setRoleDropdownOpen] = useState(false);
+  const [isSignedIn, setIsSignedIn] = useState(false);
+
+  useEffect(() => {
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) {
+      setIsSignedIn(false);
+      return;
+    }
+
+    const syncSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      const nextRole = session ? normalizeRole(session.user.app_metadata?.role ?? session.user.user_metadata?.role ?? 'student') : 'student';
+      setCurrentRole(nextRole);
+      setIsSignedIn(Boolean(session));
+    };
+
+    void syncSession();
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      const nextRole = session ? normalizeRole(session.user.app_metadata?.role ?? session.user.user_metadata?.role ?? 'student') : 'student';
+      setCurrentRole(nextRole);
+      setIsSignedIn(Boolean(session));
+      if (!session) {
+        clearStoredSession();
+      }
+    });
+
+    return () => {
+      authListener.subscription.unsubscribe();
+    };
+  }, []);
+
+  const handleSignOut = async () => {
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) return;
+
+    await supabase.auth.signOut();
+    clearStoredSession();
+    setIsSignedIn(false);
+    setCurrentRole('student');
+    router.push('/auth/login');
+  };
 
   const navLinks = [
     { label: 'Problem Hub', href: '/problems', icon: Layers },
@@ -44,7 +87,6 @@ export const Navbar: React.FC = () => {
   return (
     <header className="sticky top-0 z-50 w-full border-b border-slate-800/80 bg-navy-950/85 backdrop-blur-xl">
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
-        {/* Brand Logo */}
         <div className="flex items-center gap-6">
           <Link href="/" className="group flex items-center gap-2.5 transition-transform hover:scale-[1.02]">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-teal-400 p-0.5 shadow-lg shadow-indigo-500/20">
@@ -60,7 +102,6 @@ export const Navbar: React.FC = () => {
             </div>
           </Link>
 
-          {/* Desktop Navigation */}
           <nav className="hidden lg:flex items-center gap-1">
             {navLinks.slice(0, 7).map((item) => {
               const Icon = item.icon;
@@ -88,9 +129,7 @@ export const Navbar: React.FC = () => {
           </nav>
         </div>
 
-        {/* Right side controls */}
         <div className="flex items-center gap-3">
-          {/* Quick Assessment link */}
           <Link
             href="/assessment"
             className="hidden md:flex items-center gap-1.5 text-xs font-semibold text-teal-400 hover:text-teal-300 bg-teal-500/10 border border-teal-500/30 px-2.5 py-1.5 rounded-lg transition-colors"
@@ -99,7 +138,6 @@ export const Navbar: React.FC = () => {
             <span>Diagnostic Test</span>
           </Link>
 
-          {/* Role Preview Switcher */}
           <div className="relative hidden sm:block">
             <button
               onClick={() => setRoleDropdownOpen(!roleDropdownOpen)}
@@ -143,7 +181,6 @@ export const Navbar: React.FC = () => {
             )}
           </div>
 
-          {/* Student Streak Badge */}
           <Link
             href="/dashboard"
             className="flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs font-semibold text-amber-300 transition-transform hover:scale-105"
@@ -153,15 +190,23 @@ export const Navbar: React.FC = () => {
             <span>14d</span>
           </Link>
 
-          {/* Auth Button or User Avatar */}
-          <Link
-            href="/auth/login"
-            className="hidden sm:inline-flex items-center justify-center rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-all hover:bg-indigo-500"
-          >
-            Sign In
-          </Link>
+          {isSignedIn ? (
+            <button
+              type="button"
+              onClick={handleSignOut}
+              className="hidden sm:inline-flex items-center justify-center rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-semibold text-slate-100 shadow-sm transition-all hover:border-slate-600"
+            >
+              Sign Out
+            </button>
+          ) : (
+            <Link
+              href="/auth/login"
+              className="hidden sm:inline-flex items-center justify-center rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-all hover:bg-indigo-500"
+            >
+              Sign In
+            </Link>
+          )}
 
-          {/* Mobile hamburger button */}
           <button
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
             className="rounded-lg p-2 text-slate-400 hover:bg-slate-800 hover:text-white lg:hidden"
@@ -172,7 +217,6 @@ export const Navbar: React.FC = () => {
         </div>
       </div>
 
-      {/* Mobile Drawer Menu */}
       {mobileMenuOpen && (
         <div className="border-b border-slate-800 bg-navy-950 px-4 pt-2 pb-6 lg:hidden animate-in slide-in-from-top-4">
           <div className="grid grid-cols-2 gap-2 pt-2">
@@ -198,14 +242,28 @@ export const Navbar: React.FC = () => {
               <History className="h-4 w-4 text-teal-400" />
               <span>Learning History</span>
             </Link>
-            <Link
-              href="/auth/login"
-              onClick={() => setMobileMenuOpen(false)}
-              className="flex items-center gap-2 rounded-lg border border-indigo-500/30 bg-indigo-600/20 p-2.5 text-xs font-semibold text-indigo-300"
-            >
-              <Code2 className="h-4 w-4" />
-              <span>Login / Register</span>
-            </Link>
+            {isSignedIn ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  void handleSignOut();
+                }}
+                className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 p-2.5 text-xs font-semibold text-slate-100"
+              >
+                <Code2 className="h-4 w-4 text-indigo-400" />
+                <span>Sign Out</span>
+              </button>
+            ) : (
+              <Link
+                href="/auth/login"
+                onClick={() => setMobileMenuOpen(false)}
+                className="flex items-center gap-2 rounded-lg border border-indigo-500/30 bg-indigo-600/20 p-2.5 text-xs font-semibold text-indigo-300"
+              >
+                <Code2 className="h-4 w-4" />
+                <span>Login / Register</span>
+              </Link>
+            )}
           </div>
         </div>
       )}

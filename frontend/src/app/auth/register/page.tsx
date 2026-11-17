@@ -3,36 +3,69 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Code2, ArrowRight, CheckCircle2, Sparkles, BookOpen } from 'lucide-react';
+import { ArrowRight, CheckCircle2, Code2, Sparkles } from 'lucide-react';
 import { AppShell } from '@/components/layout/AppShell';
-import { SimulationBanner } from '@/components/ui/SimulationBanner';
+import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 
 export default function RegisterPage() {
   const router = useRouter();
   const [step, setStep] = useState(1);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('Secret123!');
   const [primaryLang, setPrimaryLang] = useState('python');
   const [goal, setGoal] = useState('pass_interviews');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
 
-  const handleComplete = (e: React.FormEvent) => {
+  const handleComplete = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
-    setTimeout(() => {
+    setErrorMessage('');
+    setSuccessMessage('');
+
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) {
+      setErrorMessage('Supabase is not configured. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.');
       setIsSubmitting(false);
-      router.push('/assessment');
-    }, 800);
+      return;
+    }
+
+    try {
+      const { error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            full_name: name,
+            preferred_language: primaryLang,
+            learning_goal: goal,
+            role: 'student',
+          },
+        },
+      });
+
+      if (error) {
+        setErrorMessage(error.message || 'Registration failed. Please try again.');
+        setIsSubmitting(false);
+        return;
+      }
+
+      setSuccessMessage('Account created successfully. Please check your email to confirm registration, then sign in.');
+      setTimeout(() => router.push('/auth/login'), 900);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Unexpected error during registration.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
     <AppShell hideFooter>
       <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center px-4 py-12 sm:px-6 lg:px-8">
         <div className="w-full max-w-md space-y-6">
-          <SimulationBanner featureName="Student Registration" />
-
           <div className="rounded-2xl border border-slate-800 bg-navy-900/80 p-8 shadow-2xl backdrop-blur-xl">
-            {/* Step indicator */}
             <div className="flex items-center justify-between mb-6">
               <span className="text-xs font-semibold uppercase text-indigo-400">Step {step} of 2</span>
               <div className="flex gap-1.5">
@@ -43,10 +76,15 @@ export default function RegisterPage() {
 
             {step === 1 ? (
               <div>
-                <h2 className="text-2xl font-bold tracking-tight text-white">Create Your Student Account</h2>
-                <p className="mt-1 text-xs text-slate-400">
-                  Begin your personalized debugging and programming curriculum.
-                </p>
+                <div className="text-center">
+                  <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-600/20 text-indigo-400 border border-indigo-500/30">
+                    <Code2 className="h-6 w-6" />
+                  </div>
+                  <h2 className="mt-4 text-2xl font-bold tracking-tight text-white">Create Your Student Account</h2>
+                  <p className="mt-1 text-xs text-slate-400">
+                    Begin your personalized debugging and programming curriculum.
+                  </p>
+                </div>
 
                 <div className="mt-6 space-y-4">
                   <div>
@@ -56,6 +94,7 @@ export default function RegisterPage() {
                       placeholder="e.g. Alex Rivera"
                       value={name}
                       onChange={(e) => setName(e.target.value)}
+                      required
                       className="mt-1 w-full rounded-lg border border-slate-700 bg-navy-950 px-3.5 py-2 text-xs text-white placeholder-slate-500 outline-none focus:border-indigo-500"
                     />
                   </div>
@@ -67,6 +106,7 @@ export default function RegisterPage() {
                       placeholder="alex.rivera@university.edu"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
+                      required
                       className="mt-1 w-full rounded-lg border border-slate-700 bg-navy-950 px-3.5 py-2 text-xs text-white placeholder-slate-500 outline-none focus:border-indigo-500"
                     />
                   </div>
@@ -76,10 +116,18 @@ export default function RegisterPage() {
                     <input
                       type="password"
                       placeholder="Create a strong password"
-                      defaultValue="Secret123!"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      required
                       className="mt-1 w-full rounded-lg border border-slate-700 bg-navy-950 px-3.5 py-2 text-xs text-white placeholder-slate-500 outline-none focus:border-indigo-500"
                     />
                   </div>
+
+                  {errorMessage && (
+                    <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-2.5 text-xs text-rose-300">
+                      {errorMessage}
+                    </div>
+                  )}
 
                   <button
                     type="button"
@@ -144,6 +192,13 @@ export default function RegisterPage() {
                     </div>
                   </div>
 
+                  {successMessage && (
+                    <div className="flex items-center gap-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 p-2.5 text-xs text-emerald-300">
+                      <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
+                      <span>{successMessage}</span>
+                    </div>
+                  )}
+
                   <div className="flex gap-2 pt-2">
                     <button
                       type="button"
@@ -162,7 +217,7 @@ export default function RegisterPage() {
                       ) : (
                         <>
                           <Sparkles className="h-4 w-4" />
-                          <span>Start Placement Diagnostic</span>
+                          <span>Create Account</span>
                         </>
                       )}
                     </button>
