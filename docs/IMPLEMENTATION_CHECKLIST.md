@@ -73,7 +73,7 @@ Status definitions: **Implemented** means source exists; **Tested** means the re
 ## Quality and delivery
 
 - [x] Add GitHub Actions checks for backend tests, frontend type/build checks, and unique migration versions.
-- [ ] Verify CI results on the pushed feature branch.
+- [x] Verify hosted CI results on PR #8: backend, frontend, and migrations passed.
 - [x] Re-run the full backend suite after dashboard and plan changes: 80 passed, 2 deprecation warnings.
 - [x] Frontend ESLint, TypeScript check, and production build pass.
 - [x] Re-run the frontend production build after the latest history, admin, and dashboard changes.
@@ -85,4 +85,3 @@ Status definitions: **Implemented** means source exists; **Tested** means the re
 - [x] Review the current staged and unstaged implementation diffs; live service checks remain pending configuration.
 - [x] Commit reviewed changes and push only to the dedicated feature branch.
 - [x] Open PR #8 against `main` without merging.
-- [ ] Verify hosted CI results on PR #8.

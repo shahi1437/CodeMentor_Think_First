@@ -198,7 +198,7 @@ The new RLS hardening migration remains pending.
 
 ## Phase 10: Deployment preparation
 - Validation: 80 backend tests passed; frontend lint, TypeScript check, and production build passed; `git diff --check` passed before final documentation changes.
-- Added GitHub Actions checks for backend tests, frontend lint/type/build checks, and migration-version uniqueness; the hosted workflow has not yet run.
+- GitHub Actions backend, frontend, and migration checks passed on PR #8 before the final documentation-only update; no deployment job is configured.
 - Frontend is upgraded to Next.js 16.4.6 / React 19.3.1 with Node 22 in CI. `npm audit --omit=dev` reports zero production vulnerabilities. The full audit still reports 21 development dependency findings (3 moderate, 18 high); resolving them requires a breaking Tailwind upgrade, so no force fix was applied.
 - No local `.env` files were found; `.env.example` contains placeholders. A repository-wide historical secret scan was not performed.
 - Live external integrations remain gated behind environment configuration.

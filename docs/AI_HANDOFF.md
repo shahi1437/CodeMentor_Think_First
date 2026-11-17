@@ -7,6 +7,7 @@
 - Base commit: `dd67f0b` (merged PR #7, based on `origin/main`).
 - PR #8 is open against `main` and has not been merged.
 - Latest complete checks: backend `80 passed` (two deprecation warnings); frontend lint, TypeScript check, and production build passed.
+- Hosted PR #8 backend, frontend, and migration checks passed on commit `4508771`.
 - No authenticated app-level Supabase, Judge0, or LLM-provider request was verified.
 
 ## Supabase production check (2026-11-18)
