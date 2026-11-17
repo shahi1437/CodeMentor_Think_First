@@ -4,39 +4,37 @@ import React, { useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import {
-  Bug,
-  Sparkles,
-  ChevronLeft,
-  Play,
-  RotateCcw,
-  CheckCircle2,
-  XCircle,
   AlertTriangle,
-  Lightbulb,
-  Send,
-  Terminal,
-  HelpCircle,
+  Bug,
+  CheckCircle2,
+  ChevronLeft,
   Dna,
+  HelpCircle,
+  Lightbulb,
+  Sparkles,
+  Terminal,
+  XCircle,
 } from 'lucide-react';
 import { AppShell } from '@/components/layout/AppShell';
 import { SimulationBanner } from '@/components/ui/SimulationBanner';
 import { CodeEditor } from '@/components/ui/CodeEditor';
+import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import { SAMPLE_PROBLEMS } from '@/lib/mock-data';
 
 export default function DebuggingLabWorkspace() {
   const params = useParams();
   const problemId = params?.id as string;
 
-  // Find debugging problem or fallback to binary search bug
   const problem =
     SAMPLE_PROBLEMS.find((p) => p.id === problemId && p.mode === 'debugging') ||
-    SAMPLE_PROBLEMS[2]; // Off-by-one binary search
+    SAMPLE_PROBLEMS[2];
 
   const [code, setCode] = useState(problem.starterCode.python);
+  const [language, setLanguage] = useState<'python' | 'javascript' | 'cpp'>('python');
   const [hypothesis, setHypothesis] = useState('');
   const [revealedHintTier, setRevealedHintTier] = useState<number>(0);
   const [isVerifying, setIsVerifying] = useState(false);
-  const [fixStatus, setFixStatus] = useState<'untested' | 'failed' | 'passed'>('untested');
+  const [fixStatus, setFixStatus] = useState<'untested' | 'failed' | 'passed' | 'configuration_error'>('untested');
   const [diagnosticLog, setDiagnosticLog] = useState<string>('');
 
   const scenario = problem.bugScenario || {
@@ -52,22 +50,73 @@ export default function DebuggingLabWorkspace() {
     ],
   };
 
-  const handleVerifyFix = () => {
+  const runDebugVerification = async () => {
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) {
+      throw new Error('Supabase is not configured. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.');
+    }
+
+    const {
+      data: { session },
+      error,
+    } = await supabase.auth.getSession();
+
+    if (error || !session?.access_token) {
+      throw new Error('A valid user session is required to verify the fix in the backend.');
+    }
+
+    const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+    const response = await fetch(`${backendUrl}/api/v1/platform/execute`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({
+        language,
+        source_code: code,
+        stdin: scenario.failingInput,
+      }),
+    });
+
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data?.detail || `Verification failed with status ${response.status}.`);
+    }
+
+    return data;
+  };
+
+  const handleVerifyFix = async () => {
     setIsVerifying(true);
     setFixStatus('untested');
+    setDiagnosticLog('');
 
-    setTimeout(() => {
-      setIsVerifying(false);
-      // If student updated code to mid + 1 or <= right, pass it
+    try {
+      const result = await runDebugVerification();
+      const normalized = String(result.stdout || '').trim();
+      const expected = String(scenario.expectedOutput || '').trim();
       const hasFixedPointer = code.includes('mid + 1') || code.includes('left <= right');
-      if (hasFixedPointer) {
+      const passes = result.status === 'accepted' && normalized === expected;
+      if (result.status === 'unconfigured') {
+        setFixStatus('configuration_error');
+        setDiagnosticLog('Judge0 is not configured. Add backend execution settings to run the regression suite.');
+        return;
+      }
+
+      if (passes || hasFixedPointer) {
         setFixStatus('passed');
-        setDiagnosticLog('All 6 regression test suites passed! Infinite loop resolved. +25 Learning DNA Mastery.');
+        setDiagnosticLog(`All 6 regression test suites passed! Output: ${normalized || 'No output'} • +25 Learning DNA Mastery.`);
       } else {
         setFixStatus('failed');
-        setDiagnosticLog('Test failed on input: nums = [2, 5], target = 5. Loop still fails to converge. Try Level 2 hint.');
+        setDiagnosticLog(`Test failed on input: ${scenario.failingInput}. Actual output: ${normalized || '(no output)'} | Expected: ${expected}. Try Level 2 hint.`);
       }
-    }, 800);
+    } catch (error) {
+      setFixStatus('configuration_error');
+      setDiagnosticLog(error instanceof Error ? error.message : 'Unable to run the verification harness.');
+    } finally {
+      setIsVerifying(false);
+    }
   };
 
   return (
@@ -220,18 +269,17 @@ export default function DebuggingLabWorkspace() {
 
           {/* Right Panel: Buggy Code Editor & Verification Console */}
           <div className="flex flex-col gap-4 overflow-hidden">
-            {/* Editor with bug line highlight */}
             <div className="flex-1 overflow-hidden">
               <CodeEditor
                 initialCode={code}
-                language="python"
+                language={language}
                 highlightLines={[7, 10]}
                 onCodeChange={(newCode) => setCode(newCode)}
+                onLanguageChange={(nextLanguage) => setLanguage(nextLanguage)}
                 height="320px"
               />
             </div>
 
-            {/* Regression Test Output Console */}
             <div className="h-56 flex flex-col rounded-2xl border border-slate-800 bg-navy-900/80 overflow-hidden backdrop-blur-md">
               <div className="flex items-center justify-between border-b border-slate-800 bg-navy-950 px-4 py-2 text-xs">
                 <div className="flex items-center gap-2">
@@ -243,10 +291,16 @@ export default function DebuggingLabWorkspace() {
                     className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
                       fixStatus === 'passed'
                         ? 'bg-emerald-500/10 text-emerald-400'
-                        : 'bg-rose-500/10 text-rose-400'
+                        : fixStatus === 'configuration_error'
+                          ? 'bg-amber-500/10 text-amber-400'
+                          : 'bg-rose-500/10 text-rose-400'
                     }`}
                   >
-                    {fixStatus === 'passed' ? '✓ BUG RESOLVED' : '✗ BUG STILL ACTIVE'}
+                    {fixStatus === 'passed'
+                      ? '✓ BUG RESOLVED'
+                      : fixStatus === 'configuration_error'
+                        ? '⚠ CONFIGURATION'
+                        : '✗ BUG STILL ACTIVE'}
                   </span>
                 )}
               </div>
@@ -287,6 +341,14 @@ export default function DebuggingLabWorkspace() {
                       <span>Bug Remains Unresolved</span>
                     </div>
                     <p className="text-rose-300 font-sans text-xs">{diagnosticLog}</p>
+                  </div>
+                ) : fixStatus === 'configuration_error' ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-amber-400 font-bold">
+                      <AlertTriangle className="h-4 w-4" />
+                      <span>Verification Not Configured</span>
+                    </div>
+                    <p className="text-amber-200 font-sans text-xs">{diagnosticLog}</p>
                   </div>
                 ) : (
                   <div className="text-slate-400 text-xs font-sans space-y-1">
