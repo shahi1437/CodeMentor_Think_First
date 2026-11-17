@@ -70,4 +70,4 @@ Status definitions: **Implemented** means source exists; **Tested** means the re
 - [x] Final backend tests, frontend build, and staged/unstaged whitespace checks pass after the latest edits.
 - [x] Staged and unstaged diffs contain no detected real `.env` files or common credential/token patterns.
 - [x] Review the current staged and unstaged implementation diffs; live service checks remain pending configuration.
-- [ ] Review staged changes before commit; push only to the development branch after validation.
+- [x] Review staged changes and push only to the development branch after validation.

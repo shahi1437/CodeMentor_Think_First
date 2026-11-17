@@ -3,8 +3,8 @@
 ## Current checkpoint
 
 - Branch: `full-platform-completion`
-- Starting HEAD for the current uncommitted work: `c5a8cdad781153077a2f80c7d3d2f14d3789a447`.
-- Changes in progress are unstaged/uncommitted and must be preserved.
+- Base commit for the current milestone: `c5a8cdad781153077a2f80c7d3d2f14d3789a447`.
+- The milestone is committed and pushed; continue from current branch history.
 - Latest complete validation: backend 70 passed (two deprecation warnings); frontend production build passed.
 - No live Supabase, Judge0, or LLM request was verified.
 
@@ -38,6 +38,6 @@
 
 ## Next command/action
 
-The current milestone is locally implemented and validated but remains uncommitted. Review the final diff and secret scan, then publish only with the explicit caveat that live Supabase/Judge0/LLM verification awaits private configuration.
+The current milestone is locally implemented, validated, committed, and pushed. Live Supabase/Judge0/LLM verification still awaits private configuration; do not describe the services as live-tested.
 
 No live external service verification has occurred. Do not commit or push this partial platform milestone as full-platform completion.
