@@ -19,15 +19,21 @@ class FakeTable:
         self.limit_value = None
         self.order_value = None
         self.selected_columns = None
+        self.head = False
+        self.count_mode = None
 
-    def select(self, *args, **_kwargs):
+    def select(self, *args, **kwargs):
         if self.method is None:
             self.filters = []
             self.single = False
             self.limit_value = None
             self.order_value = None
+            self.head = False
+            self.count_mode = None
         selected = args[0] if args else "*"
         self.selected_columns = None if selected == "*" else [column.strip() for column in selected.split(",")]
+        self.head = kwargs.get("head", False)
+        self.count_mode = kwargs.get("count")
         return self
 
     def _project(self, row):
@@ -68,6 +74,15 @@ class FakeTable:
 
     def execute(self):
         try:
+            if self.head:
+                result = [
+                    row for row in self.rows
+                    if all(row.get(key) == value for key, value in self.filters)
+                ]
+                count = len(result) if self.count_mode == "exact" else None
+                self.method = None
+                return type("Response", (), {"data": None, "count": count})()
+
             if self.method in {"insert", "upsert"}:
                 row = self.payload
                 if isinstance(row, list):
@@ -140,6 +155,8 @@ class FakeTable:
             self.limit_value = None
             self.order_value = None
             self.selected_columns = None
+            self.head = False
+            self.count_mode = None
 
 
 class FakeSupabaseClient:
@@ -220,6 +237,32 @@ def test_database_service_does_not_fake_success_when_write_is_not_confirmed():
 
     with pytest.raises(RuntimeError, match="did not confirm the persisted submission"):
         service.create_submission({"user_id": "user-1", "source_code": "print(1)"})
+
+
+def test_admin_dashboard_metrics_use_exact_database_counts():
+    client = FakeSupabaseClient({
+        "profiles": [
+            {"id": "student-1", "role": "student"},
+            {"id": "student-2", "role": "student"},
+            {"id": "teacher-1", "role": "teacher"},
+        ],
+        "problems": [
+            {"id": "published-1", "is_published": True},
+            {"id": "draft-1", "is_published": False},
+        ],
+        "submissions": [{"id": "submission-1"}, {"id": "submission-2"}],
+        "courses": [{"id": "course-1", "is_published": True}],
+    })
+    service = DatabaseService(client=client)
+
+    assert service.get_admin_dashboard_metrics() == {
+        "total_users": 3,
+        "students": 2,
+        "teachers": 1,
+        "published_problems": 1,
+        "submissions": 2,
+        "published_courses": 1,
+    }
 
 
 def test_problem_queries_do_not_select_hidden_test_cases():

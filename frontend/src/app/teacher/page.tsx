@@ -94,7 +94,7 @@ export default function TeacherDashboardPage() {
           <div className="mt-6 rounded-xl border border-emerald-500/30 bg-emerald-950/40 p-4 text-xs text-emerald-300 flex items-center justify-between animate-in fade-in">
             <div className="flex items-center gap-2">
               <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-              <span>Socratic Hint dispatched to <strong className="text-white">{alertSent}</strong>'s workspace.</span>
+              <span>Socratic Hint dispatched to <strong className="text-white">{alertSent}</strong>&apos;s workspace.</span>
             </div>
             <span className="text-[11px] text-slate-400">Notification sent</span>
           </div>

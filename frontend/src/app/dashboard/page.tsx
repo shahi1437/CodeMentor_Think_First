@@ -150,7 +150,7 @@ export default function StudentDashboardPage() {
             {/* Daily Checklist */}
             <div className="rounded-2xl border border-slate-800 bg-navy-900/60 p-6 backdrop-blur-md">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-sm font-bold text-white">Today's Adaptive Routine</h3>
+                <h3 className="text-sm font-bold text-white">Today&apos;s Adaptive Routine</h3>
                 <span className="text-xs text-slate-400">1 of 4 completed</span>
               </div>
               <div className="space-y-2.5">

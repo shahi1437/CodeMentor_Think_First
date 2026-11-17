@@ -65,7 +65,7 @@ export default function AdaptiveDailyPlanPage() {
             className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-navy-900 px-3.5 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-800 hover:text-white transition-colors"
           >
             <RotateCcw className={`h-3.5 w-3.5 ${isRegenerating ? 'animate-spin text-teal-400' : ''}`} />
-            <span>Regenerate Today's Plan</span>
+            <span>Regenerate Today&apos;s Plan</span>
           </button>
         </div>
 
@@ -74,7 +74,7 @@ export default function AdaptiveDailyPlanPage() {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <span className="text-xs font-semibold uppercase tracking-wider text-indigo-400">
-                Today's Milestone Progress
+                Today&apos;s Milestone Progress
               </span>
               <div className="mt-1 flex items-baseline gap-2">
                 <span className="text-3xl font-extrabold text-white">{completedCount} of {tasks.length}</span>

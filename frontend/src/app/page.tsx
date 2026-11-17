@@ -294,7 +294,7 @@ export default function LandingPage() {
               </div>
               <h3 className="text-base font-bold text-white">Socratic AI Mentor</h3>
               <p className="mt-2 text-xs text-slate-300 leading-relaxed">
-                Rather than giving away code answers that stunt student learning, our AI mentor asks probing Socratic questions, points out unhandled edge cases, and guides you to the "Aha!" moment.
+                Rather than giving away code answers that stunt student learning, our AI mentor asks probing Socratic questions, points out unhandled edge cases, and guides you to the &quot;Aha!&quot; moment.
               </p>
               <Link href="/mentor" className="mt-4 inline-flex items-center gap-1 text-xs font-semibold text-teal-400 hover:text-teal-300">
                 Meet AI Mentor <ChevronRight className="h-3.5 w-3.5" />

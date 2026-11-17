@@ -23,7 +23,15 @@
 - Use an explicit public problem-field allowlist; never select the legacy `hidden_test_cases` column for student-facing reads.
 - Grade submissions against database-owned `problem_test_cases`; return and persist only verdict/count summaries, not test inputs or outputs.
 - Exclude runtime metadata and outputs from student submission history so old rows cannot leak hidden cases.
-- Apply the additive column-grant migration before claiming direct Supabase-client privacy; its live execution remains unverified.
+- The additive column-grant migration's schema effects and grants were verified remotely, and version `20261118000100` was recorded after explicit approval. Authenticated-client denial testing remains outstanding.
+
+## 2026-11-18 — Course-scoped direct-client RLS hardening
+
+- Replace broad teacher reads of profiles and mentor conversation metadata with active-enrollment checks, and prevent students from directly creating/changing enrollments.
+- Remove direct authenticated writes to submissions so verdicts remain backend-controlled; allow students to read only their own records.
+- Do not grant teachers submission reads yet: there is no problem-to-course assignment relation, so active student enrollment cannot prove that a particular submission belongs to a teacher's course.
+- Bind mentor messages to the authenticated sender's own conversation and database role.
+- Keep the new additive migration local until isolated role-based policy tests pass and explicit production approval is obtained.
 
 ## 2026-11-19 — Fail-closed authentication and persistence
 

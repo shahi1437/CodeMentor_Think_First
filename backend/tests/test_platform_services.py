@@ -58,6 +58,70 @@ def test_platform_status_reports_judge0_configuration(monkeypatch):
     assert response.json()["judge0"] == "missing_config"
 
 
+def test_admin_dashboard_rejects_non_admin_users(monkeypatch):
+    token = create_test_token("student-admin-dashboard", "student@example.com", "student")
+    response = client.get(
+        "/api/v1/platform/admin/dashboard-summary",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 403
+
+
+def test_admin_dashboard_returns_database_metrics_and_configuration(monkeypatch):
+    token = create_test_token("admin-dashboard", "admin@example.com", "admin")
+    monkeypatch.setattr(platform.settings, "JUDGE0_API_URL", "")
+    monkeypatch.setattr(platform.settings, "LLM_API_URL", "https://llm.example.test")
+    monkeypatch.setattr(platform.settings, "LLM_API_KEY", "test-provider-key")
+
+    class FakeDatabase:
+        configured = True
+
+        def get_admin_dashboard_metrics(self):
+            return {
+                "total_users": 12,
+                "students": 10,
+                "teachers": 2,
+                "published_problems": 7,
+                "submissions": 31,
+                "published_courses": 1,
+            }
+
+    monkeypatch.setattr(platform, "get_database_service", lambda: FakeDatabase())
+    response = client.get(
+        "/api/v1/platform/admin/dashboard-summary",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "metrics": {
+            "total_users": 12,
+            "students": 10,
+            "teachers": 2,
+            "published_problems": 7,
+            "submissions": 31,
+            "published_courses": 1,
+        },
+        "integrations": {
+            "database": "configured",
+            "judge0": "missing_config",
+            "llm": "configured",
+        },
+    }
+
+
+def test_teacher_dashboard_does_not_return_simulated_metrics():
+    token = create_test_token("teacher-dashboard", "teacher@example.com", "teacher")
+    response = client.get(
+        "/api/v1/platform/dashboard-summary",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 503
+    assert "course-scoped" in response.json()["detail"]
+
+
 def test_ml_classifier_detects_name_error_pattern():
     prediction = ErrorClassifier.predict_error("print(name)\n", language="python")
     assert prediction["label"] in {"name_error", "logic_error", "syntax_error"}
