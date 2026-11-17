@@ -13,6 +13,15 @@ class Settings(BaseSettings):
     SUPABASE_JWT_SECRET: str = "dev-secret-key-change-in-production-supabase-jwt-secret-key-32chars"
     SUPABASE_SERVICE_ROLE_KEY: str = ""
 
+    # Judge0 CE Execution
+    JUDGE0_API_URL: str = ""
+    JUDGE0_AUTH_TOKEN: str = ""
+
+    # LLM / AI Mentor configuration
+    LLM_API_URL: str = ""
+    LLM_API_KEY: str = ""
+    LLM_MODEL: str = "gpt-4o-mini"
+
     # CORS configuration for Next.js frontend
     CORS_ORIGINS: List[str] = [
         "http://localhost:3000",
