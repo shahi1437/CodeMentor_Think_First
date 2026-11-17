@@ -5,7 +5,7 @@
 - Repository: `shahi1437/CodeMentor_Think_First`
 - Branch: `feature/complete-production-launch`
 - Base commit: `dd67f0b` (merged PR #7, based on `origin/main`).
-- Milestone commit `67b7721` is pushed to the feature branch; a pull request has not yet been opened.
+- PR #8 is open against `main` and has not been merged.
 - Latest complete checks: backend `80 passed` (two deprecation warnings); frontend lint, TypeScript check, and production build passed.
 - No authenticated app-level Supabase, Judge0, or LLM-provider request was verified.
 
@@ -101,7 +101,7 @@
 3. Implement safe database-backed admin problem CRUD, publication validation, adaptive selection, and a shared execution rate limiter.
 4. Persist mentor conversations/messages and add knowledge retrieval only when vector/provider configuration is available.
 5. Add teacher analytics only after a problem-to-course relationship and isolated authorization tests exist.
-6. Open a PR targeting `main` and verify its hosted checks; do not merge without explicit approval.
+6. Verify PR #8 hosted checks; do not merge without explicit approval.
 
 ## Configuration and live verification
 

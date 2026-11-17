@@ -2,7 +2,7 @@
 
 ## Current branch
 - `feature/complete-production-launch`, based on `origin/main` at `dd67f0b`.
-- Milestone commit `67b7721` is pushed to the feature branch; a pull request has not yet been opened.
+- Pull request #8 targets `main`; it is open and has not been merged.
 
 ## Supabase production audit (2026-11-18)
 - Existing project `codementor-ai-prod` (`ap-northeast-1`) is active and linked

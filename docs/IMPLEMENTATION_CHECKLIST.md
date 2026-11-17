@@ -84,4 +84,5 @@ Status definitions: **Implemented** means source exists; **Tested** means the re
 - [x] No real `.env` files were changed; repository-wide historical secret scanning remains pending.
 - [x] Review the current staged and unstaged implementation diffs; live service checks remain pending configuration.
 - [x] Commit reviewed changes and push only to the dedicated feature branch.
-- [ ] Open a PR without merging; verify hosted CI results.
+- [x] Open PR #8 against `main` without merging.
+- [ ] Verify hosted CI results on PR #8.
