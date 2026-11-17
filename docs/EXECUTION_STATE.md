@@ -8,6 +8,25 @@
 - Latest complete validation: backend 70 passed (two deprecation warnings); frontend production build passed.
 - No live Supabase, Judge0, or LLM request was verified.
 
+## Supabase production audit checkpoint (2026-11-17)
+
+- The existing `codementor-ai-prod` Supabase project is active and linked via
+  the CLI; the remote database answered read-only schema catalog queries.
+- Remote public schema: all 15 application tables are present and RLS is
+  enabled. Client SELECT is revoked on `problems.hidden_test_cases` and
+  `problems.progressive_hints`; student case policy filters hidden cases.
+- Migration list shows no remote versions (migration-history table absent),
+  while the dry run lists all five local files as pending. The schema already
+  has the corresponding objects. No migration was pushed or repaired.
+- Do not push or repair until the user approves history reconciliation. The two
+  `20261118` files share a version prefix and need a unique-version plan first.
+- RLS gaps: teachers can read all profiles/submissions/mentor conversations
+  directly; student submissions have a direct-client `FOR ALL` policy. Narrow
+  these against course enrollment before claiming full authorization.
+- This is not a backend connection test: `.env` files are absent and no real
+  service-role/JWT configuration was loaded. The backend test suite passed
+  locally (70 tests); no remote test records were created.
+
 ## Latest milestone
 
 - Handoff documents were added and the implementation checklist is current.

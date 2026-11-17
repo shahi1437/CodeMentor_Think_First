@@ -24,15 +24,43 @@ CodeMentor AI is a learning platform for coding practice, debugging skill develo
    - `npm install`
    - `npm run dev`
 
-## Supabase beginner setup
+## Connect an existing Supabase project
 
-1. Create a new Supabase project.
-2. Open Project Settings -> API.
-3. Copy the project URL and anon key.
-4. Copy the JWT secret from Project Settings -> API -> JWT Secret.
-5. Put the project URL, service-role key, and JWT secret only in `backend/.env`. Put the project URL and anon key in `frontend/.env.local` (these are public client values).
-6. In the Supabase SQL editor, run the migration files in filename order. This includes `20261119_harden_profile_role_rls.sql` and `20261120_problem_catalog_metadata.sql`.
-7. Sign up a user in the app. Provision the first administrator through a trusted, out-of-band database procedure; after that, role changes must use the backend's admin-only role flow. Never promote an account from client code.
+Do not create a second project for this repository. From the repository root, use
+the existing project's reference ID from Supabase Dashboard -> Project Settings ->
+General:
+
+```powershell
+npx supabase login
+npx supabase projects list
+npx supabase link --project-ref <project-reference-id>
+npx supabase migration list --remote
+npx supabase db push --remote --dry-run
+```
+
+The CLI login uses the browser/account flow. Never paste an access token into chat
+or commit local Supabase CLI state. Review the remote schema and migration history
+before applying SQL; a dry run only lists pending migrations and does not check
+whether their objects already exist.
+
+**Deployment audit:** the linked production project currently contains the
+platform tables and schema objects, but its Supabase migration history has no
+records. The CLI therefore reports all five local migrations as pending. Do not
+run `db push` against this project. Migration history repair requires explicit
+approval after schema reconciliation; the two `20261118` files also need unique
+version IDs before they can be tracked safely. No migrations were applied by
+this audit.
+
+For local configuration, copy the backend values from `.env.example` to
+`backend/.env`, and only the frontend values (`NEXT_PUBLIC_BACKEND_URL`,
+`NEXT_PUBLIC_SUPABASE_URL`, and `NEXT_PUBLIC_SUPABASE_ANON_KEY`) to
+`frontend/.env.local`. Obtain the URL, anon key, service-role key, and JWT
+verification secret from the existing project's Dashboard -> Project Settings ->
+API. The service-role key and JWT secret must remain backend-only.
+
+Sign up a user in the app. Provision the first administrator through a trusted,
+out-of-band database procedure; after that, role changes must use the backend's
+admin-only role flow. Never promote an account from client code.
 
 Important:
 - Never commit `.env` or service-role credentials to Git.
@@ -83,11 +111,24 @@ Learning DNA values are used.
 ## Database security notes
 
 - The database uses Supabase Row Level Security (RLS).
-- Students can only read their own data and public problem content.
-- Teachers and admins can access controlled course and management records.
+- RLS is enabled on all 15 audited public tables. Student-owned records and
+  published problem/sample access have owner/public-case policies.
+- The current direct-client teacher policies are broader than the intended
+  class-scoped access: some permit teachers to view all profiles, submissions,
+  and mentor conversations. The backend currently denies teacher profile and
+  submission access without an authorized course scope; do not rely on the
+  direct-client policies for that boundary until they are narrowed.
+- Students have an `ALL` policy on their own submissions, which permits direct
+  writes to their own rows. Current app submission writes go through the backend;
+  restrict the policy before enabling browser-side submission writes.
 - Backend problem and submission-history APIs exclude hidden test data, including legacy submission outputs.
 - Browser clients are not granted access to the `progressive_hints` column; hints are served one tier at a time by the backend.
-- Apply `20261118_problem_hidden_column_security.sql` before allowing browser clients to query `problems` directly; live migration verification is still required.
+- The production catalog shows `SELECT` revoked for clients on
+  `problems.hidden_test_cases` and `problems.progressive_hints`; row-level
+  policies expose only public problem test cases to students. This was checked
+  from PostgreSQL catalogs, not by an authenticated test-account query.
+- The production schema currently has no migration history, so do not assume
+  `20261118_problem_hidden_column_security.sql` was recorded as applied.
 
 ## Validation
 

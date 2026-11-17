@@ -16,6 +16,11 @@ dist/
 .env.test.local
 .env.production.local
 *.env
+.env.*
+!.env.example
+
+# Local Supabase CLI state
+/supabase/.temp/
 
 # Python Virtual Environment
 venv/
@@ -38,7 +43,5 @@ yarn-error.log*
 *.sln
 *.sw?
 thumbs.db
-.env.*
-!.env.example
 # TypeScript build cache
 *.tsbuildinfo
