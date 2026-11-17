@@ -4,7 +4,7 @@
 
 - Branch: `feature/complete-production-launch`
 - Base commit: `dd67f0b` (merged PR #7, based on `origin/main`).
-- Current milestone changes are uncommitted and have not been pushed; review before delivery.
+- Milestone commit `67b7721` is pushed to the feature branch; open a PR without merging.
 - Latest complete validation: backend 80 passed (two deprecation warnings); frontend lint, TypeScript check, and production build passed.
 - No authenticated app-level Supabase, Judge0, or LLM request was verified.
 
@@ -84,7 +84,7 @@
 
 ## Next command/action
 
-The current changes are uncommitted on `feature/complete-production-launch`. Live app-level Supabase/Judge0/LLM verification still awaits private configuration.
+Commit `67b7721` is pushed to `feature/complete-production-launch`. Open a PR targeting `main`; do not merge without approval. Live app-level Supabase/Judge0/LLM verification still awaits private configuration.
 
 No authenticated app-level Supabase, Judge0, or LLM integration verification
 has occurred. Read-only Supabase catalog queries did succeed. Do not commit or

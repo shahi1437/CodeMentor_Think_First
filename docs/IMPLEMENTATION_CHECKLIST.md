@@ -83,4 +83,5 @@ Status definitions: **Implemented** means source exists; **Tested** means the re
 - [x] Final backend tests, frontend build, and staged/unstaged whitespace checks pass after the latest edits.
 - [x] No real `.env` files were changed; repository-wide historical secret scanning remains pending.
 - [x] Review the current staged and unstaged implementation diffs; live service checks remain pending configuration.
-- [ ] Commit reviewed changes, push only to the dedicated feature branch, and open a PR without merging.
+- [x] Commit reviewed changes and push only to the dedicated feature branch.
+- [ ] Open a PR without merging; verify hosted CI results.
