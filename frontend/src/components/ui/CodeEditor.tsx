@@ -1,12 +1,14 @@
 'use client';
 
-import React, { useState } from 'react';
-import { Copy, RotateCcw, Check, Terminal, Code, Sparkles } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import Editor from '@monaco-editor/react';
+import { Copy, RotateCcw, Check, Code } from 'lucide-react';
 
 interface CodeEditorProps {
   initialCode: string;
-  language?: string;
+  language?: 'python' | 'javascript' | 'cpp';
   onCodeChange?: (code: string) => void;
+  onLanguageChange?: (language: 'python' | 'javascript' | 'cpp') => void;
   readOnly?: boolean;
   highlightLines?: number[];
   height?: string;
@@ -16,37 +18,51 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
   initialCode,
   language = 'python',
   onCodeChange,
+  onLanguageChange,
   readOnly = false,
   highlightLines = [],
   height = '420px',
 }) => {
   const [code, setCode] = useState(initialCode);
   const [copied, setCopied] = useState(false);
-  const [selectedLang, setSelectedLang] = useState(language);
+  const [selectedLang, setSelectedLang] = useState<'python' | 'javascript' | 'cpp'>(language);
 
-  const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const newCode = e.target.value;
-    setCode(newCode);
-    if (onCodeChange) onCodeChange(newCode);
+  useEffect(() => {
+    setCode(initialCode);
+  }, [initialCode]);
+
+  useEffect(() => {
+    setSelectedLang(language);
+  }, [language]);
+
+  const handleEditorChange = (value?: string) => {
+    const nextCode = value ?? '';
+    setCode(nextCode);
+    onCodeChange?.(nextCode);
   };
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(code);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const handleLanguageChange = (nextLanguage: 'python' | 'javascript' | 'cpp') => {
+    setSelectedLang(nextLanguage);
+    onLanguageChange?.(nextLanguage);
+  };
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopied(false);
+    }
   };
 
   const handleReset = () => {
     setCode(initialCode);
-    if (onCodeChange) onCodeChange(initialCode);
+    onCodeChange?.(initialCode);
   };
-
-  // Split into lines for editor gutter
-  const lines = code.split('\n');
 
   return (
     <div className="flex flex-col rounded-xl border border-slate-800 bg-navy-950 overflow-hidden shadow-2xl">
-      {/* Editor top toolbar */}
       <div className="flex items-center justify-between border-b border-slate-800 bg-navy-900/90 px-4 py-2 text-xs">
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-1.5">
@@ -59,7 +75,7 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
             <Code className="h-3.5 w-3.5 text-indigo-400" />
             <select
               value={selectedLang}
-              onChange={(e) => setSelectedLang(e.target.value)}
+              onChange={(event) => handleLanguageChange(event.target.value as 'python' | 'javascript' | 'cpp')}
               className="bg-transparent text-xs text-slate-200 outline-none cursor-pointer hover:text-white"
             >
               <option value="python" className="bg-navy-900">solution.py (Python 3.12)</option>
@@ -96,34 +112,33 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
         </div>
       </div>
 
-      {/* Editor area with line numbers */}
-      <div className="relative flex font-mono text-xs" style={{ minHeight: height }}>
-        {/* Line Numbers Gutter */}
-        <div className="select-none bg-navy-900/40 px-3 py-3 text-right font-mono text-slate-600 border-r border-slate-800/80">
-          {lines.map((_, i) => {
-            const lineNum = i + 1;
-            const isHighlighted = highlightLines.includes(lineNum);
-            return (
-              <div
-                key={i}
-                className={`leading-6 ${
-                  isHighlighted ? 'font-bold text-rose-400 bg-rose-500/10 px-1 -mx-1 rounded' : ''
-                }`}
-              >
-                {lineNum}
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Text Area */}
-        <textarea
+      <div className="relative" style={{ minHeight: height }}>
+        <Editor
+          height={height}
+          width="100%"
+          language={selectedLang}
+          theme="vs-dark"
           value={code}
-          onChange={handleTextChange}
-          readOnly={readOnly}
-          spellCheck={false}
-          className="w-full flex-1 resize-none bg-navy-950 p-3 leading-6 text-slate-100 outline-none selection:bg-indigo-500/30 selection:text-indigo-200 font-mono"
-          style={{ minHeight: height }}
+          defaultValue={initialCode}
+          onChange={handleEditorChange}
+          loading={<div className="flex h-full min-h-[220px] items-center justify-center bg-navy-950 text-xs text-slate-400">Loading editor...</div>}
+          options={{
+            readOnly,
+            minimap: { enabled: false },
+            fontSize: 12,
+            lineNumbers: 'on',
+            automaticLayout: true,
+            wordWrap: 'on',
+            padding: { top: 12, bottom: 12 },
+            scrollBeyondLastLine: false,
+            smoothScrolling: true,
+            glyphMargin: false,
+            folding: false,
+            lineHeight: 22,
+            suggestOnTriggerCharacters: true,
+            roundedSelection: true,
+            tabSize: 2,
+          }}
         />
       </div>
     </div>

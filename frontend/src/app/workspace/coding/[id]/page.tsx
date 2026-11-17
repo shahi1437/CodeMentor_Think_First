@@ -4,85 +4,189 @@ import React, { useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import {
-  Code2,
+  CheckCircle2,
+  ChevronLeft,
   Play,
   Send,
-  RotateCcw,
-  CheckCircle2,
-  XCircle,
-  Clock,
-  Cpu,
-  Layers,
-  ChevronLeft,
-  ChevronRight,
   Sparkles,
   Terminal,
 } from 'lucide-react';
 import { AppShell } from '@/components/layout/AppShell';
 import { SimulationBanner } from '@/components/ui/SimulationBanner';
 import { CodeEditor } from '@/components/ui/CodeEditor';
+import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import { SAMPLE_PROBLEMS } from '@/lib/mock-data';
 
 export default function NormalCodingWorkspace() {
   const params = useParams();
   const problemId = params?.id as string;
 
-  // Find problem or default to first
   const problem = SAMPLE_PROBLEMS.find((p) => p.id === problemId) || SAMPLE_PROBLEMS[0];
 
   const [activeTab, setActiveTab] = useState<'description' | 'submissions'>('description');
   const [activeTestCaseTab, setActiveTestCaseTab] = useState<number>(0);
+  const [code, setCode] = useState(problem.starterCode.python);
+  const [language, setLanguage] = useState<'python' | 'javascript' | 'cpp'>('python');
   const [isRunning, setIsRunning] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [executionResult, setExecutionResult] = useState<{
-    status: 'idle' | 'running' | 'success' | 'failed';
+    status: 'idle' | 'running' | 'accepted' | 'wrong_answer' | 'compilation_error' | 'runtime_error' | 'time_limit_exceeded' | 'memory_limit_exceeded' | 'validation_error' | 'configuration_error' | 'error';
+    stdout?: string;
+    stderr?: string;
+    compileOutput?: string;
+    message?: string;
     runtimeMs?: number;
     memoryMb?: number;
     testResults?: { id: string; passed: boolean; output: string; expected: string }[];
   }>({ status: 'idle' });
 
-  const handleRunSampleTests = () => {
+  const runPlatformRequest = async (endpoint: 'execute' | 'submit', payload: Record<string, unknown>) => {
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) {
+      throw new Error('Supabase is not configured. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.');
+    }
+
+    const {
+      data: { session },
+      error,
+    } = await supabase.auth.getSession();
+
+    if (error || !session?.access_token) {
+      throw new Error('A valid user session is required to run code in the backend sandbox.');
+    }
+
+    const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+    const response = await fetch(`${backendUrl}/api/v1/platform/${endpoint}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data?.detail || `The backend request failed with status ${response.status}.`);
+    }
+
+    return data;
+  };
+
+  const handleRunSampleTests = async () => {
     setIsRunning(true);
     setExecutionResult({ status: 'running' });
 
-    setTimeout(() => {
-      setIsRunning(false);
+    try {
+      const payload = {
+        language,
+        source_code: code,
+        stdin: problem.sampleTestCases[activeTestCaseTab]?.input ?? '',
+      };
+      const result = await runPlatformRequest('execute', payload);
+      const normalizedStatus =
+        result.status === 'accepted'
+          ? 'accepted'
+          : result.status === 'wrong_answer'
+            ? 'wrong_answer'
+            : result.status === 'compilation_error'
+              ? 'compilation_error'
+              : result.status === 'runtime_error'
+                ? 'runtime_error'
+                : result.status === 'time_limit_exceeded'
+                  ? 'time_limit_exceeded'
+                  : result.status === 'memory_limit_exceeded'
+                    ? 'memory_limit_exceeded'
+                    : result.status === 'validation_error'
+                      ? 'validation_error'
+                      : result.status === 'unconfigured'
+                        ? 'configuration_error'
+                        : 'error';
+
       setExecutionResult({
-        status: 'success',
-        runtimeMs: 44,
-        memoryMb: 14.2,
+        status: normalizedStatus,
+        stdout: result.stdout || '',
+        stderr: result.stderr || '',
+        compileOutput: result.compile_output || '',
+        message: result.message || 'Execution finished.',
+        runtimeMs: result.execution_time_ms ?? undefined,
+        memoryMb: result.memory_kb ? result.memory_kb / 1024 : undefined,
         testResults: problem.sampleTestCases.map((tc) => ({
           id: tc.id,
-          passed: true,
-          output: tc.expectedOutput,
+          passed: result.status === 'accepted' && (result.stdout || '').trim() === (tc.expectedOutput || '').trim(),
+          output: String(result.stdout || '').trim(),
           expected: tc.expectedOutput,
         })),
       });
-    }, 700);
+    } catch (error) {
+      setExecutionResult({
+        status: 'configuration_error',
+        message: error instanceof Error ? error.message : 'Unable to reach the backend execution service.',
+      });
+    } finally {
+      setIsRunning(false);
+    }
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     setIsSubmitting(true);
     setExecutionResult({ status: 'running' });
 
-    setTimeout(() => {
-      setIsSubmitting(false);
-      setExecutionResult({
-        status: 'success',
-        runtimeMs: 38,
-        memoryMb: 14.6,
-        testResults: [
-          ...problem.sampleTestCases.map((tc) => ({
-            id: tc.id,
-            passed: true,
-            output: tc.expectedOutput,
-            expected: tc.expectedOutput,
-          })),
-          { id: 'hidden-1', passed: true, output: 'Validated', expected: 'Confidential' },
-          { id: 'hidden-2', passed: true, output: 'Validated', expected: 'Confidential' },
-        ],
+    try {
+      const result = await runPlatformRequest('submit', {
+        problem_id: problem.id,
+        language,
+        source_code: code,
+        stdin: problem.sampleTestCases[0]?.input ?? '',
+        test_cases: problem.sampleTestCases.map((tc) => ({
+          input: tc.input,
+          expected_output: tc.expectedOutput,
+          is_hidden: false,
+        })),
+        mode: 'submit',
       });
-    }, 1100);
+
+      const normalizedStatus =
+        result.status === 'accepted'
+          ? 'accepted'
+          : result.status === 'wrong_answer'
+            ? 'wrong_answer'
+            : result.status === 'compilation_error'
+              ? 'compilation_error'
+              : result.status === 'runtime_error'
+                ? 'runtime_error'
+                : result.status === 'time_limit_exceeded'
+                  ? 'time_limit_exceeded'
+                  : result.status === 'memory_limit_exceeded'
+                    ? 'memory_limit_exceeded'
+                    : result.status === 'validation_error'
+                      ? 'validation_error'
+                      : result.status === 'unconfigured'
+                        ? 'configuration_error'
+                        : 'error';
+
+      setExecutionResult({
+        status: normalizedStatus,
+        stdout: result.stdout || '',
+        stderr: result.stderr || '',
+        message: result.message || 'Submission processed.',
+        runtimeMs: result.execution_time_ms ?? undefined,
+        memoryMb: result.memory_kb ? result.memory_kb / 1024 : undefined,
+        testResults: problem.sampleTestCases.map((tc) => ({
+          id: tc.id,
+          passed: result.passed_test_count > 0,
+          output: String(result.stdout || '').trim(),
+          expected: tc.expectedOutput,
+        })),
+      });
+    } catch (error) {
+      setExecutionResult({
+        status: 'configuration_error',
+        message: error instanceof Error ? error.message : 'Unable to submit the solution.',
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -231,12 +335,16 @@ export default function NormalCodingWorkspace() {
 
           {/* Right Panel: Editor + Console Runner */}
           <div className="flex flex-col gap-4 overflow-hidden">
-            {/* Editor */}
             <div className="flex-1 overflow-hidden">
-              <CodeEditor initialCode={problem.starterCode.python} language="python" height="320px" />
+              <CodeEditor
+                initialCode={code}
+                language={language}
+                onCodeChange={(newCode) => setCode(newCode)}
+                onLanguageChange={(nextLanguage) => setLanguage(nextLanguage)}
+                height="320px"
+              />
             </div>
 
-            {/* Test Case & Output Console */}
             <div className="h-56 flex flex-col rounded-2xl border border-slate-800 bg-navy-900/80 overflow-hidden backdrop-blur-md">
               {/* Console Tabs */}
               <div className="flex items-center justify-between border-b border-slate-800 bg-navy-950 px-4 py-2 text-xs">
@@ -267,20 +375,18 @@ export default function NormalCodingWorkspace() {
                 )}
               </div>
 
-              {/* Console Body */}
               <div className="flex-1 overflow-y-auto p-4 text-xs font-mono">
                 {executionResult.status === 'running' ? (
                   <div className="flex items-center justify-center h-full gap-2 text-indigo-400">
                     <span className="h-4 w-4 rounded-full border-2 border-indigo-400/30 border-t-indigo-400 animate-spin"></span>
                     <span>Transmitting code to Judge0 CE container...</span>
                   </div>
-                ) : executionResult.status === 'success' ? (
+                ) : executionResult.status === 'accepted' ? (
                   <div className="space-y-3">
                     <div className="flex items-center gap-2 text-emerald-400 font-bold">
                       <CheckCircle2 className="h-4 w-4" />
                       <span>All Sample Tests Passed!</span>
                     </div>
-
                     <div className="rounded-xl border border-slate-800 bg-navy-950 p-3 space-y-1.5 text-[11px]">
                       <div className="text-slate-400">
                         <span className="text-slate-500">Input: </span>
@@ -288,15 +394,36 @@ export default function NormalCodingWorkspace() {
                       </div>
                       <div className="text-emerald-400">
                         <span className="text-slate-500">Your Output: </span>
-                        {problem.sampleTestCases[activeTestCaseTab]?.expectedOutput}
+                        {executionResult.stdout || problem.sampleTestCases[activeTestCaseTab]?.expectedOutput}
                       </div>
                     </div>
+                    {executionResult.message && <div className="text-slate-300">{executionResult.message}</div>}
+                  </div>
+                ) : executionResult.status === 'configuration_error' ? (
+                  <div className="space-y-2 text-amber-300">
+                    <p className="font-semibold">Execution is not configured yet.</p>
+                    <p className="text-[11px] text-slate-300">{executionResult.message}</p>
+                  </div>
+                ) : executionResult.status !== 'idle' ? (
+                  <div className="space-y-2 text-slate-300">
+                    <p className="font-semibold text-rose-300">Execution status: {executionResult.status}</p>
+                    {executionResult.message && <p>{executionResult.message}</p>}
+                    {executionResult.stdout && (
+                      <div className="rounded-lg bg-navy-950 p-2.5 border border-slate-800">
+                        <span className="block text-[10px] uppercase text-slate-500 mb-1">Output</span>
+                        <pre className="whitespace-pre-wrap text-[11px] text-slate-200">{executionResult.stdout}</pre>
+                      </div>
+                    )}
+                    {executionResult.stderr && (
+                      <div className="rounded-lg bg-rose-950/20 p-2.5 border border-rose-500/20">
+                        <span className="block text-[10px] uppercase text-rose-400 mb-1">Error</span>
+                        <pre className="whitespace-pre-wrap text-[11px] text-rose-200">{executionResult.stderr}</pre>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="text-slate-400 text-xs font-sans space-y-2">
-                    <p className="font-semibold text-slate-300">
-                      Sample Case {activeTestCaseTab + 1}:
-                    </p>
+                    <p className="font-semibold text-slate-300">Sample Case {activeTestCaseTab + 1}:</p>
                     <div className="rounded-lg bg-navy-950 p-2.5 font-mono text-[11px] border border-slate-800">
                       {problem.sampleTestCases[activeTestCaseTab]?.input}
                     </div>

@@ -19,6 +19,8 @@ from backend.app.schemas.platform import (
     LearningDNAResponse,
     MentorRequest,
     MentorResponse,
+    SubmissionRequest,
+    SubmissionResponse,
 )
 
 router = APIRouter(prefix="/platform", tags=["Platform services"])
@@ -108,6 +110,17 @@ async def list_student_daily_plans(current_user: UserProfile = Depends(require_s
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 
 
+@router.get("/submissions")
+async def list_submissions(current_user: UserProfile = Depends(require_student)):
+    database = get_database_service()
+    try:
+        if current_user.role == UserRole.STUDENT:
+            return database.list_submissions(user_id=current_user.id, limit=20)
+        return database.list_submissions(limit=20)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+
+
 @router.post("/execute", response_model=ExecuteResponse)
 async def execute_platform_code(payload: ExecuteRequest, current_user: UserProfile = Depends(require_student)):
     result = await execute_code(payload.language, payload.source_code, payload.stdin)
@@ -120,6 +133,76 @@ async def execute_platform_code(payload: ExecuteRequest, current_user: UserProfi
         compile_output=result.get("compile_output", ""),
         message=result.get("message", "Execution completed."),
         execution_id=result.get("execution_id"),
+        execution_time_ms=result.get("execution_time_ms"),
+        memory_kb=result.get("memory_kb"),
+    )
+
+
+@router.post("/submit", response_model=SubmissionResponse)
+async def submit_code(payload: SubmissionRequest, current_user: UserProfile = Depends(require_student)):
+    database = get_database_service()
+    problem = database.get_problem(payload.problem_id) if payload.problem_id else None
+    if payload.problem_id and not problem:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Problem not found.")
+    if problem and problem.get("is_published") is False and current_user.role == UserRole.STUDENT:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Hidden problems are not available to students.")
+
+    if current_user.role == UserRole.STUDENT and any(test_case.is_hidden for test_case in payload.test_cases):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Hidden tests are never exposed or processed for students.")
+
+    public_cases = list(payload.test_cases) or [{"input": payload.stdin, "expected_output": "", "is_hidden": False}]
+    results = []
+    passed_cases = 0
+    total_cases = len(public_cases)
+
+    for test_case in public_cases:
+        execution = await execute_code(payload.language, payload.source_code, test_case.input)
+        actual_output = (execution.get("stdout") or "").strip()
+        expected_output = str(test_case.expected_output or "").strip()
+        is_accepted = execution.get("status") == "accepted" and actual_output == expected_output
+        if is_accepted:
+            passed_cases += 1
+        results.append({
+            "input": test_case.input,
+            "expected_output": expected_output,
+            "actual_output": actual_output,
+            "status": execution.get("status", "error"),
+        })
+
+    verdict = "accepted" if total_cases and passed_cases == total_cases else "wrong_answer"
+    if not total_cases:
+        verdict = "invalid_submission"
+    if any(result["status"] in {"compilation_error", "runtime_error", "time_limit_exceeded", "memory_limit_exceeded", "validation_error"} for result in results):
+        verdict = result["status"] if result["status"] in {"compilation_error", "runtime_error", "time_limit_exceeded", "memory_limit_exceeded", "validation_error"} else verdict
+
+    submission_record = {
+        "user_id": current_user.id,
+        "problem_id": payload.problem_id,
+        "status": verdict,
+        "score": round((passed_cases / total_cases) * 100, 2) if total_cases else 0.0,
+        "language": payload.language,
+        "source_code": payload.source_code,
+        "stdout": "\n".join(result["actual_output"] for result in results)[:2000],
+        "stderr": "\n".join(result["status"] for result in results)[:2000],
+        "runtime_metadata": {"passed_test_count": passed_cases, "total_test_count": total_cases, "results": results},
+    }
+
+    try:
+        created = database.create_submission(submission_record)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+
+    submission_id = created.get("id") or created.get("submission_id")
+    return SubmissionResponse(
+        submission_id=str(submission_id) if submission_id else None,
+        verdict=verdict,
+        passed_test_count=passed_cases,
+        total_test_count=total_cases,
+        score=float(submission_record["score"]),
+        message="Submission processed successfully." if verdict == "accepted" else "Submission did not pass all public checks.",
+        status=verdict,
+        stdout=submission_record["stdout"],
+        stderr=submission_record["stderr"],
     )
 
 
