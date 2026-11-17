@@ -306,6 +306,28 @@ class DatabaseService:
         response = client.table("audit_logs").insert(payload).select("*").execute()
         return self._require_written_row(response, "audit log")
 
+    def get_admin_dashboard_metrics(self) -> Dict[str, int]:
+        client = self._require_client()
+
+        def count_rows(table_name: str, filters: Optional[Dict[str, Any]] = None) -> int:
+            query = client.table(table_name).select("id", count="exact", head=True)
+            for column, value in (filters or {}).items():
+                query = query.eq(column, value)
+            response = query.execute()
+            count = getattr(response, "count", None)
+            if not isinstance(count, int):
+                raise RuntimeError(f"Supabase did not return an exact count for {table_name}.")
+            return count
+
+        return {
+            "total_users": count_rows("profiles"),
+            "students": count_rows("profiles", {"role": "student"}),
+            "teachers": count_rows("profiles", {"role": "teacher"}),
+            "published_problems": count_rows("problems", {"is_published": True}),
+            "submissions": count_rows("submissions"),
+            "published_courses": count_rows("courses", {"is_published": True}),
+        }
+
 
 _database_service = DatabaseService()
 

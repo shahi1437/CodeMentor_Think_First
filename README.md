@@ -43,13 +43,18 @@ or commit local Supabase CLI state. Review the remote schema and migration histo
 before applying SQL; a dry run only lists pending migrations and does not check
 whether their objects already exist.
 
-**Deployment audit:** the linked production project currently contains the
-platform tables and schema objects, but its Supabase migration history has no
-records. The CLI therefore reports all five local migrations as pending. Do not
-run `db push` against this project. Migration history repair requires explicit
-approval after schema reconciliation; the two `20261118` files also need unique
-version IDs before they can be tracked safely. No migrations were applied by
-this audit.
+**Deployment audit:** the linked production project contains the platform
+tables and schema objects. After schema reconciliation and explicit approval,
+the five verified local versions were recorded as applied in Supabase migration
+history; no migration SQL was executed. `migration list --remote` confirmed
+the versions. Do not run `db push` for these versions. The duplicate `20261118`
+local version was resolved by renaming the hidden-column migration to
+`20261118000100_problem_hidden_column_security.sql` without changing its SQL.
+History now matches the repository, but it does not prove when the SQL was
+originally executed.
+The new `20261121000100_scope_course_data_rls.sql` migration is not applied;
+do not push it to production until isolated RLS tests pass and explicit
+production approval is obtained.
 
 For local configuration, copy the backend values from `.env.example` to
 `backend/.env`, and only the frontend values (`NEXT_PUBLIC_BACKEND_URL`,
@@ -83,6 +88,11 @@ The Problem Hub and coding/debugging workspaces read published problems and publ
 
 Problem metadata includes `problem_mode` (`normal`, `debugging`, or `both`), `tags`, `supported_languages`, and `progressive_hints`. The current admin challenge screens do not yet provide complete database-backed create/edit/publish workflows; add and validate records through a trusted administrative process until those screens are implemented.
 Hint unlock progress is stored per student/problem in `problem_hint_progress`; higher tiers cannot be requested before prior tiers have been unlocked.
+
+The administrator dashboard uses an admin-only backend endpoint for persisted
+database counts. External provider labels show configuration only, not service
+health. Teacher analytics are unavailable until course-scoped data can be
+retrieved and verified safely.
 
 ## Configure the AI Mentor
 
@@ -127,8 +137,9 @@ Learning DNA values are used.
   `problems.hidden_test_cases` and `problems.progressive_hints`; row-level
   policies expose only public problem test cases to students. This was checked
   from PostgreSQL catalogs, not by an authenticated test-account query.
-- The production schema currently has no migration history, so do not assume
-  `20261118_problem_hidden_column_security.sql` was recorded as applied.
+- The five baseline versions are recorded in production migration history.
+  The new course-scoped security migration is local only and must not be
+  deployed until it has been tested and explicitly approved.
 
 ## Validation
 
@@ -142,3 +153,11 @@ venv\Scripts\python.exe -m pytest tests -q
 External services are not represented as successful when configuration is missing. In particular, the AI Mentor requires backend LLM configuration and a successful provider response; configure real credentials to verify the live integration.
 
 For frontend production validation, run `cd frontend` and `npm run build`. For the complete backend suite from the repository root, run `backend\\venv\\Scripts\\python.exe -m pytest backend\\tests -q`.
+
+GitHub Actions runs the backend suite, frontend lint/type/build checks, and
+verifies that Supabase migration versions are unique. It does not deploy
+services or apply database migrations.
+
+The current production dependency audit still reports one critical Next.js
+advisory. The available fix requires a major Next.js upgrade; do not treat this
+repository as production-ready until that upgrade is reviewed and validated.

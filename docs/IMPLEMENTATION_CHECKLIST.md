@@ -13,6 +13,8 @@ Status definitions: **Implemented** means source exists; **Tested** means the re
 ## Database and submissions
 
 - [x] Additive migrations define the platform table set and RLS policies.
+- [x] Existing five migration versions are recorded in production after schema-equivalence review.
+- [ ] Apply the new course-scoped RLS hardening migration after isolated policy tests and explicit production approval.
 - [x] Problem metadata migration adds mode, tags, configured languages, and server-controlled progressive hints.
 - [x] Backend public-sample query explicitly filters hidden cases.
 - [x] Progressive hints are served one tier per authenticated backend request.
@@ -22,8 +24,9 @@ Status definitions: **Implemented** means source exists; **Tested** means the re
 - [x] Database service exposes Supabase-backed operations.
 - [x] Submission API maps verdicts to constraint-supported statuses and preserves exact verdict metadata.
 - [ ] CRUD APIs completed and tested for all required domains.
-- [ ] Live migration execution and database verification.
-- [ ] Apply and verify the hidden-test column-grant migration in a live Supabase project.
+- [x] Verify baseline migration-history records with `supabase migration list --remote`.
+- [ ] Verify hidden-test denial using authenticated student and teacher test accounts.
+- [ ] Run the new RLS migration against an isolated database and test student/teacher/admin boundaries before requesting production approval.
 
 ## Coding and debugging
 
@@ -59,14 +62,20 @@ Status definitions: **Implemented** means source exists; **Tested** means the re
 
 - [x] Learning DNA is aggregated from authenticated persisted submission history.
 - [x] First-time learner and loading/error states are implemented.
-- [ ] Replace mock dashboard metrics with authorized backend data.
+- [ ] Replace remaining student/teacher mock dashboard metrics with authorized backend data.
+- [x] Replace administrator mock metrics with an admin-only database-count endpoint; teacher analytics remain explicitly unavailable pending scope-safe data.
 - [ ] Verify teacher/student data boundaries with tests and live RLS.
+- [ ] Add a problem-to-course assignment relationship before enabling teacher submission access.
 
 ## Quality and delivery
 
-- [x] Re-run the full backend suite after the latest problem-catalog tests and service changes: 70 passed, 2 deprecation warnings.
+- [x] Add GitHub Actions checks for backend tests, frontend type/build checks, and unique migration versions.
+- [ ] Verify CI results on the pushed feature branch.
+- [x] Re-run the full backend suite after admin metrics changes: 74 passed, 2 deprecation warnings.
+- [x] Frontend ESLint, TypeScript check, and production build pass.
 - [x] Re-run the frontend production build after the latest workspace/filter changes.
 - [ ] Complete repository-wide historical secret and security review.
+- [ ] Resolve the critical Next.js production dependency advisory; the available fix is a major-version upgrade and needs review.
 - [x] Final backend tests, frontend build, and staged/unstaged whitespace checks pass after the latest edits.
 - [x] Staged and unstaged diffs contain no detected real `.env` files or common credential/token patterns.
 - [x] Review the current staged and unstaged implementation diffs; live service checks remain pending configuration.

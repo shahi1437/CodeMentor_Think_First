@@ -131,7 +131,7 @@ export default function AdminProblemStudioPage() {
           <div className="mt-6 rounded-xl border border-emerald-500/30 bg-emerald-950/40 p-4 text-xs text-emerald-300 flex items-center justify-between animate-in fade-in">
             <div className="flex items-center gap-2">
               <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-              <span>Problem "{title}" successfully published to Problem Hub! Redirecting...</span>
+              <span>Problem &quot;{title}&quot; successfully published to Problem Hub! Redirecting...</span>
             </div>
           </div>
         )}

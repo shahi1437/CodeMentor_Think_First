@@ -14,7 +14,7 @@ from backend.app.core.config import settings
 from backend.app.core.judge0 import execute_code
 from backend.app.core.learning_dna import summarize_learning_dna
 from backend.app.core.ml_classifier import ErrorClassifier
-from backend.app.core.auth import get_current_user, require_student, require_teacher
+from backend.app.core.auth import get_current_user, require_admin, require_student, require_teacher
 from backend.app.schemas.auth import UserProfile, UserRole
 from backend.app.schemas.platform import (
     ErrorPredictionRequest,
@@ -445,13 +445,30 @@ async def learning_dna(current_user: UserProfile = Depends(require_student)):
 
 @router.get("/dashboard-summary")
 async def dashboard_summary(current_user: UserProfile = Depends(require_teacher)):
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="Teacher analytics require verified course-scoped student and submission data.",
+    )
+
+
+@router.get("/admin/dashboard-summary")
+async def admin_dashboard_summary(current_user: UserProfile = Depends(require_admin)):
+    database = get_database_service()
+    if not database.configured:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Administrator metrics require a configured Supabase database.",
+        )
+    try:
+        metrics = database.get_admin_dashboard_metrics()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+
     return {
-        "status": "ok",
-        "role": current_user.role.value,
-        "metrics": {
-            "active_students": 128,
-            "problems_solved": 834,
-            "bug_resolution_rate": 0.87,
+        "metrics": metrics,
+        "integrations": {
+            "database": "configured",
+            "judge0": "configured" if settings.JUDGE0_API_URL else "missing_config",
+            "llm": "configured" if settings.LLM_API_URL and settings.LLM_API_KEY else "missing_config",
         },
-        "alerts": ["Two students need support on recursion diagnostics.", "Follow-up quiz unlocks in 3 hours."],
     }
