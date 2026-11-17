@@ -17,14 +17,22 @@ class FakeTable:
         self.single = False
         self.limit_value = None
         self.order_value = None
+        self.selected_columns = None
 
-    def select(self, *_args, **_kwargs):
+    def select(self, *args, **_kwargs):
         self.filters = []
         self.single = False
         self.limit_value = None
         self.order_value = None
         self.method = None
+        selected = args[0] if args else "*"
+        self.selected_columns = None if selected == "*" else [column.strip() for column in selected.split(",")]
         return self
+
+    def _project(self, row):
+        if self.selected_columns is None:
+            return row
+        return {key: row[key] for key in self.selected_columns if key in row}
 
     def eq(self, key, value):
         self.filters.append((key, value))
@@ -103,14 +111,18 @@ class FakeTable:
                 for row in self.rows:
                     if all(row.get(key) == value for key, value in self.filters):
                         self.method = None
-                        return type("Response", (), {"data": row})()
+                        return type("Response", (), {"data": self._project(row)})()
                 self.method = None
                 return type("Response", (), {"data": None})()
 
             if self.order_value:
-                result = list(self.rows)
+                result = [
+                    row for row in self.rows
+                    if all(row.get(key) == value for key, value in self.filters)
+                ]
                 if self.limit_value:
                     result = result[: self.limit_value]
+                result = [self._project(row) for row in result]
                 self.method = None
                 return type("Response", (), {"data": result})()
 
@@ -118,6 +130,7 @@ class FakeTable:
                 result = list(self.rows)[: self.limit_value]
             else:
                 result = list(self.rows)
+            result = [self._project(row) for row in result]
             self.method = None
             return type("Response", (), {"data": result})()
         finally:
@@ -125,6 +138,7 @@ class FakeTable:
             self.single = False
             self.limit_value = None
             self.order_value = None
+            self.selected_columns = None
 
 
 class FakeSupabaseClient:
@@ -152,6 +166,74 @@ def test_database_service_persists_profile_role_changes():
 
     assert updated["role"] == "teacher"
     assert service.get_user_profile("user-1")["role"] == "teacher"
+
+
+def test_problem_queries_do_not_select_hidden_test_cases():
+    client = FakeSupabaseClient({
+        "problems": [{
+            "id": "problem-1",
+            "title": "Public problem",
+            "is_published": True,
+            "hidden_test_cases": [{"input": "secret", "expected_output": "private"}],
+        }],
+    })
+    service = DatabaseService(client=client)
+
+    problem = service.get_problem("problem-1")
+    problems = service.list_problems()
+
+    assert problem == {"id": "problem-1", "title": "Public problem", "is_published": True}
+    assert problems == [{"id": "problem-1", "title": "Public problem", "is_published": True}]
+
+
+def test_database_service_reads_learning_submissions_for_the_requested_user():
+    client = FakeSupabaseClient({
+        "submissions": [
+            {"user_id": "user-1", "problem_id": "problem-1", "status": "passed", "language": "python"},
+            {"user_id": "user-2", "problem_id": "problem-2", "status": "failed", "language": "cpp"},
+        ],
+    })
+    service = DatabaseService(client=client)
+
+    submissions = service.list_learning_submissions("user-1", limit=10)
+
+    assert len(submissions) == 1
+    assert submissions[0]["problem_id"] == "problem-1"
+
+
+def test_database_service_reads_test_cases_only_for_requested_problem():
+    client = FakeSupabaseClient({
+        "problem_test_cases": [
+            {"problem_id": "problem-1", "input_text": "private", "expected_output": "private-result", "is_hidden": True},
+            {"problem_id": "problem-2", "input_text": "other", "expected_output": "other-result", "is_hidden": False},
+        ],
+    })
+    service = DatabaseService(client=client)
+
+    cases = service.list_problem_test_cases("problem-1", limit=10)
+
+    assert cases == [{
+        "input_text": "private",
+        "expected_output": "private-result",
+        "is_hidden": True,
+    }]
+
+
+def test_database_service_reads_persisted_learning_dna_profile():
+    client = FakeSupabaseClient({
+        "learning_dna_profiles": [{
+            "user_id": "user-1",
+            "mastery": {"debugging": 61},
+            "streak_days": 3,
+            "consistency": 0.6,
+        }],
+    })
+    service = DatabaseService(client=client)
+
+    profile = service.get_learning_dna_profile("user-1")
+
+    assert profile["mastery"] == {"debugging": 61}
+    assert profile["streak_days"] == 3
 
 
 def test_database_service_requires_configuration(monkeypatch):
