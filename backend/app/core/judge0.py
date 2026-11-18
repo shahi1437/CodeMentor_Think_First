@@ -138,7 +138,7 @@ async def execute_code(language: str, source_code: str, stdin: str = "") -> Dict
             "stdout": "",
             "stderr": "",
             "compile_output": "",
-            "message": "Judge0 is not configured. Set JUDGE0_API_URL and JUDGE0_AUTH_TOKEN to enable execution.",
+            "message": "Judge0 is not configured. Set JUDGE0_API_URL in backend/.env.",
             "execution_id": None,
             "execution_time_ms": None,
             "memory_kb": None,
@@ -177,6 +177,20 @@ async def execute_code(language: str, source_code: str, stdin: str = "") -> Dict
             "stderr": "",
             "compile_output": "",
             "message": "Judge0 did not return a result before the backend timeout.",
+            "execution_id": None,
+            "execution_time_ms": None,
+            "memory_kb": None,
+        }
+    except httpx.ConnectError:
+        logger.warning("The configured Judge0 service could not be reached.")
+        return {
+            "status": "error",
+            "configured": True,
+            "language": target_language,
+            "stdout": "",
+            "stderr": "",
+            "compile_output": "",
+            "message": "The configured Judge0 service could not be reached. Check that it is running.",
             "execution_id": None,
             "execution_time_ms": None,
             "memory_kb": None,

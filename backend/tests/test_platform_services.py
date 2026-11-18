@@ -23,6 +23,8 @@ def create_test_token(sub: str, email: str, role: str, expires_in: int = 3600) -
         role_store.set_user_role(sub, role)
     payload = {
         "sub": sub,
+        "iss": f"{settings.SUPABASE_URL}/auth/v1",
+        "aud": "authenticated",
         "email": email,
         "role": "authenticated",
         "app_metadata": {"role": role},
@@ -32,7 +34,19 @@ def create_test_token(sub: str, email: str, role: str, expires_in: int = 3600) -
     return jwt.encode(payload, settings.SUPABASE_JWT_SECRET, algorithm="HS256")
 
 
-def test_execution_endpoint_returns_safe_unconfigured_response():
+@pytest.fixture
+def available_execution_quota(monkeypatch):
+    async def allow(_database, _user_id, _action):
+        return None
+
+    monkeypatch.setattr(platform, "enforce_execution_quota", allow)
+
+
+def test_execution_endpoint_returns_safe_unconfigured_response(monkeypatch):
+    async def unexpected_quota(*_args):
+        pytest.fail("An unconfigured Judge0 should not consume quota.")
+
+    monkeypatch.setattr(platform, "enforce_execution_quota", unexpected_quota)
     token = create_test_token("student-exec", "student@example.com", "student")
     headers = {"Authorization": f"Bearer {token}"}
     response = client.post(
@@ -42,8 +56,9 @@ def test_execution_endpoint_returns_safe_unconfigured_response():
     )
     assert response.status_code == 200
     data = response.json()
-    assert data["status"] in {"unconfigured", "success", "error", "runtime_error"}
-    assert "Judge0" in data["message"] or "Execution" in data["message"] or "completed" in data["message"].lower()
+    assert data["status"] == "unconfigured"
+    assert not data["configured"]
+    assert "JUDGE0_API_URL" in data["message"]
 
 
 def test_platform_status_reports_judge0_configuration(monkeypatch):
@@ -318,6 +333,22 @@ def test_mentor_endpoint_uses_persisted_learning_dna(monkeypatch):
     class FakeDatabase:
         configured = True
 
+        def consume_execution_quota(self, user_id, action, limit, window):
+            assert user_id == "student-mentor-dna" and action == "mentor"
+            return 0
+
+        def get_mentor_conversation(self, user_id, conversation_id):
+            assert user_id == "student-mentor-dna"
+            return None
+
+        def list_learning_submissions(self, user_id, limit):
+            return []
+
+        def append_mentor_turn(self, turn):
+            assert turn["p_user_id"] == "student-mentor-dna"
+            assert turn["p_answer"]
+            return True
+
         def get_learning_dna_profile(self, user_id):
             assert user_id == "student-mentor-dna"
             return {"mastery": {"debugging": 61}, "streak_days": 3, "consistency": 0.6}
@@ -404,6 +435,36 @@ def test_learning_dna_endpoint_requires_database_configuration(monkeypatch):
 
     assert response.status_code == 503
     assert "Supabase database" in response.json()["detail"]
+
+
+@pytest.mark.parametrize("database_state,expected_status,expected_detail", [
+    ("unconfigured", 503, "SUPABASE_SERVICE_ROLE_KEY"),
+    ("unavailable", 503, "Unable to retrieve the problem catalog"),
+    ("empty", 200, None),
+])
+def test_problem_catalog_distinguishes_database_state(monkeypatch, database_state, expected_status, expected_detail):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    from backend.app.core.database import DatabaseService
+
+    database = DatabaseService()
+    if database_state != "unconfigured":
+        database.client = Mock()
+        query = database.client.table.return_value.select.return_value.eq.return_value
+        execute = query.order.return_value.limit.return_value.execute
+        if database_state == "unavailable":
+            execute.side_effect = httpx.ConnectError("Test connection failure")
+        else:
+            execute.return_value = SimpleNamespace(data=[])
+    monkeypatch.setattr(platform, "get_database_service", lambda: database)
+    token = create_test_token("catalog-state", "student@example.com", "student")
+    response = client.get("/api/v1/platform/problems", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == expected_status
+    if expected_detail:
+        assert expected_detail in response.json()["detail"]
+    else:
+        assert response.json() == []
 
 
 def test_problem_endpoints_never_return_hidden_test_cases(monkeypatch):
@@ -545,7 +606,7 @@ def test_submission_verdicts_map_to_database_constraint_values():
     assert platform._submission_database_status("configuration_error") == "error"
 
 
-def test_submit_unconfigured_execution_does_not_report_wrong_answer(monkeypatch):
+def test_submit_unconfigured_execution_does_not_report_wrong_answer(monkeypatch, available_execution_quota):
     stored = {}
 
     class ConfiguredDatabase:
@@ -579,7 +640,7 @@ def test_submit_unconfigured_execution_does_not_report_wrong_answer(monkeypatch)
     assert stored["runtime_metadata"]["verdict"] == "configuration_error"
 
 
-def test_submission_uses_backend_test_cases_without_returning_hidden_data(monkeypatch):
+def test_submission_uses_backend_test_cases_without_returning_hidden_data(monkeypatch, available_execution_quota):
     stored = {}
     executed_inputs = []
     grading_cases = [

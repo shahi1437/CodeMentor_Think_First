@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import {
   Bug,
   Calendar,
@@ -19,17 +19,18 @@ import {
   Terminal,
   X,
 } from 'lucide-react';
-import { clearStoredSession, normalizeRole } from '@/lib/auth';
+import { getVerifiedRole, portalDestination } from '@/lib/auth';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import { Role } from '@/types';
 
 export const Navbar: React.FC = () => {
   const pathname = usePathname();
-  const router = useRouter();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [currentRole, setCurrentRole] = useState<Role>('student');
+  const [currentRole, setCurrentRole] = useState<Role | null>(null);
   const [roleDropdownOpen, setRoleDropdownOpen] = useState(false);
   const [isSignedIn, setIsSignedIn] = useState(false);
+  const [isSigningOut, setIsSigningOut] = useState(false);
+  const [signOutError, setSignOutError] = useState('');
 
   useEffect(() => {
     const supabase = getSupabaseBrowserClient();
@@ -37,25 +38,25 @@ export const Navbar: React.FC = () => {
       return;
     }
 
-    const syncSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      const nextRole = session ? normalizeRole(session.user.app_metadata?.role ?? session.user.user_metadata?.role ?? 'student') : 'student';
-      setCurrentRole(nextRole);
-      setIsSignedIn(Boolean(session));
-    };
-
-    void syncSession();
-
+    let sessionVersion = 0;
     const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
-      const nextRole = session ? normalizeRole(session.user.app_metadata?.role ?? session.user.user_metadata?.role ?? 'student') : 'student';
-      setCurrentRole(nextRole);
+      const version = ++sessionVersion;
       setIsSignedIn(Boolean(session));
+      setCurrentRole(null);
       if (!session) {
-        clearStoredSession();
+        return;
       }
+      // Run outside the auth callback so the Supabase client can release its lock.
+      setTimeout(() => {
+        if (version !== sessionVersion) return;
+        void getVerifiedRole(session.access_token).then((role) => {
+          if (version === sessionVersion) setCurrentRole(role);
+        }).catch(() => { /* Profile verification is reported on the sign-in page. */ });
+      }, 0);
     });
 
     return () => {
+      sessionVersion++;
       authListener.subscription.unsubscribe();
     };
   }, []);
@@ -64,17 +65,22 @@ export const Navbar: React.FC = () => {
     const supabase = getSupabaseBrowserClient();
     if (!supabase) return;
 
-    await supabase.auth.signOut();
-    clearStoredSession();
-    setIsSignedIn(false);
-    setCurrentRole('student');
-    router.push('/auth/login');
+    setIsSigningOut(true);
+    setSignOutError('');
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) throw error;
+      window.location.replace('/auth/login');
+    } catch {
+      setSignOutError('Sign-out did not complete. Try again.');
+      setIsSigningOut(false);
+    }
   };
 
   const navLinks = [
     { label: 'Problem Hub', href: '/problems', icon: Layers },
-    { label: 'Normal Coding', href: '/workspace/coding/p-1', icon: Code2, modeTag: 'Normal' },
-    { label: 'Debugging Lab', href: '/workspace/debugging/p-3', icon: Bug, modeTag: 'Debug' },
+    { label: 'Normal Coding', href: '/problems?mode=normal', icon: Code2, modeTag: 'Normal' },
+    { label: 'Debugging Lab', href: '/problems?mode=debugging', icon: Bug, modeTag: 'Debug' },
     { label: 'AI Mentor', href: '/mentor', icon: Sparkles },
     { label: 'Learning DNA', href: '/learning-dna', icon: Dna },
     { label: 'Daily Plan', href: '/daily-plan', icon: Calendar },
@@ -141,41 +147,30 @@ export const Navbar: React.FC = () => {
             <button
               onClick={() => setRoleDropdownOpen(!roleDropdownOpen)}
               className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900/90 px-2.5 py-1.5 text-xs font-medium text-slate-200 transition-colors hover:border-slate-600"
-              title="Switch role view to preview Student, Teacher, or Admin UI"
+              title="View your account role"
             >
               <span className="text-[10px] uppercase text-slate-400 font-semibold">Role:</span>
-              <span className="capitalize font-semibold text-indigo-400">{currentRole}</span>
+              <span className="capitalize font-semibold text-indigo-400">{currentRole ?? (isSignedIn ? 'Unverified' : 'Guest')}</span>
               <ChevronDown className="h-3 w-3 text-slate-400" />
             </button>
 
             {roleDropdownOpen && (
               <div className="absolute right-0 mt-2 w-48 rounded-xl border border-slate-700 bg-navy-900 p-1.5 shadow-2xl backdrop-blur-xl z-50">
                 <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                  Switch Active Role
+                  Account
                 </div>
-                <button
-                  onClick={() => { setCurrentRole('student'); setRoleDropdownOpen(false); }}
-                  className={`flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-xs transition-colors ${currentRole === 'student' ? 'bg-indigo-600/20 text-indigo-300' : 'text-slate-300 hover:bg-slate-800'}`}
-                >
-                  <span className="font-medium">Student (Alex R.)</span>
-                  {currentRole === 'student' && <span className="h-1.5 w-1.5 rounded-full bg-indigo-400"></span>}
-                </button>
                 <Link
-                  href="/teacher"
-                  onClick={() => { setCurrentRole('teacher'); setRoleDropdownOpen(false); }}
-                  className={`flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-xs transition-colors ${currentRole === 'teacher' ? 'bg-indigo-600/20 text-indigo-300' : 'text-slate-300 hover:bg-slate-800'}`}
+                  href={currentRole ? portalDestination(currentRole) : '/auth/login'}
+                  onClick={() => setRoleDropdownOpen(false)}
+                  className="flex w-full items-center rounded-lg px-2.5 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
                 >
-                  <span className="font-medium">Teacher (Prof. Marcus)</span>
-                  {currentRole === 'teacher' && <span className="h-1.5 w-1.5 rounded-full bg-teal-400"></span>}
+                  {currentRole ? 'Open your dashboard' : 'Sign in'}
                 </Link>
-                <Link
-                  href="/admin"
-                  onClick={() => { setCurrentRole('admin'); setRoleDropdownOpen(false); }}
-                  className={`flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-xs transition-colors ${currentRole === 'admin' ? 'bg-indigo-600/20 text-indigo-300' : 'text-slate-300 hover:bg-slate-800'}`}
-                >
-                  <span className="font-medium">Admin (System)</span>
-                  {currentRole === 'admin' && <span className="h-1.5 w-1.5 rounded-full bg-rose-400"></span>}
-                </Link>
+                {currentRole === 'admin' && (
+                  <Link href="/teacher" onClick={() => setRoleDropdownOpen(false)} className="block rounded-lg px-2.5 py-1.5 text-xs text-slate-300 hover:bg-slate-800">
+                    Teacher portal
+                  </Link>
+                )}
               </div>
             )}
           </div>
@@ -193,9 +188,10 @@ export const Navbar: React.FC = () => {
             <button
               type="button"
               onClick={handleSignOut}
+              disabled={isSigningOut}
               className="hidden sm:inline-flex items-center justify-center rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-semibold text-slate-100 shadow-sm transition-all hover:border-slate-600"
             >
-              Sign Out
+              {isSigningOut ? 'Signing out…' : 'Sign Out'}
             </button>
           ) : (
             <Link
@@ -215,6 +211,8 @@ export const Navbar: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {signOutError && <p role="alert" className="px-4 pb-2 text-right text-xs text-rose-300">{signOutError}</p>}
 
       {mobileMenuOpen && (
         <div className="border-b border-slate-800 bg-navy-950 px-4 pt-2 pb-6 lg:hidden animate-in slide-in-from-top-4">
@@ -244,6 +242,7 @@ export const Navbar: React.FC = () => {
             {isSignedIn ? (
               <button
                 type="button"
+                disabled={isSigningOut}
                 onClick={() => {
                   setMobileMenuOpen(false);
                   void handleSignOut();
@@ -251,7 +250,7 @@ export const Navbar: React.FC = () => {
                 className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 p-2.5 text-xs font-semibold text-slate-100"
               >
                 <Code2 className="h-4 w-4 text-indigo-400" />
-                <span>Sign Out</span>
+                <span>{isSigningOut ? 'Signing out…' : 'Sign Out'}</span>
               </button>
             ) : (
               <Link

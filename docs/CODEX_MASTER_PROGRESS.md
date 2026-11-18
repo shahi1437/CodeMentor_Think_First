@@ -1,0 +1,179 @@
+# CodeMentor AI — Master Progress Tracker
+
+## Visual Code Analyzer milestone · ১৯ নভেম্বর ২০২৬
+
+Analyzer-এর পুরোনো preset/simulation UI সরিয়ে বাস্তব authenticated Python AST analysis যুক্ত করা হয়েছে। Source code কখনো execute করা হয় না; শুধু backend-এ parse করা হয়। Commit, push, merge, deploy বা production database migration চালানো হয়নি।
+
+### যা বাস্তবায়ন হয়েছে
+
+- **Backend API:** `POST /api/v1/platform/analyze` যোগ করা হয়েছে। এটি আগের `analyze_python()` output-ই reuse করে এবং `require_student` dependency দিয়ে student, teacher ও admin—তিন role-এর authenticated access নিশ্চিত করে।
+- **Input validation:** শুধু Python গ্রহণ করা হয়, অজানা field প্রত্যাখ্যান করা হয় এবং source সর্বোচ্চ ১,০০,০০০ character। বেশি বড় source বা ভুল payload `422` দেয়; authentication ছাড়া request `401` দেয়।
+- **Structured response:** `language`, `analysis_type`, `valid_syntax`, syntax error-এর line/offset/message, functions ও recursion, loops, branches, max loop depth, time/space complexity, findings, `estimates_are_heuristic`, `complexity_basis` এবং `limitations` ফেরত দেয়। Submitted source response-এ echo করা হয় না।
+- **Safety:** AST parsing ছাড়া কোনো execution, `eval`, `exec` বা shell call নেই। অতিরিক্ত nested source-এ `RecursionError` হলে generic `422` দেয়; stack trace বা backend secret leak হয় না।
+- **Frontend:** Monaco editor দিয়ে editable Python input, “Analyze Code” button, authenticated `backendRequest` integration এবং real result rendering যোগ করা হয়েছে। Loading, idle/empty, syntax-error, auth, validation, configuration, network/unavailable ও unexpected error—সব state আলাদা বার্তা ও recovery action সহ আছে।
+- **Heuristic স্পষ্টীকরণ:** time/space complexity “estimated” হিসেবে দেখানো হয় এবং `complexity_basis` ও limitations UI-তে প্রদর্শিত হয়। Preset তিনটি শুধু example source হিসেবে লেবেল করা; কোনো fixed/simulated finding বাস্তব ফল হিসেবে দেখানো হয় না। আগের simulation banner ও timeline walkthrough সরানো হয়েছে।
+
+### ফাইল পরিবর্তন
+
+- নতুন: `backend/tests/test_analyzer.py`, `frontend/src/lib/analyzer.ts`, `frontend/tests/analyzer.test.mjs`
+- পরিবর্তিত: `backend/app/schemas/platform.py`, `backend/app/api/v1/endpoints/platform.py`, `frontend/src/components/ui/CodeEditor.tsx`, `frontend/src/app/analyzer/page.tsx`, `frontend/package.json`, `docs/CODEX_MASTER_PROGRESS.md`
+
+### যাচাইয়ের ফল
+
+| যাচাই | ফল |
+| --- | --- |
+| `backend/venv/Scripts/python.exe -m pytest backend/tests supabase/tests -q -ra` | **PASS — ১৪৯ পাস, ৩ স্কিপ, ২ warning।** নতুন analyzer test ১৩টি পাস; ৩টি skip disposable Supabase integration test। |
+| `npm test` (frontend) | **PASS — ৯ পাস, ০ ফেল, ০ স্কিপ।** এর মধ্যে analyzer contract ও error-classification test ৬টি নতুন। |
+| `npm run lint` | **PASS — কোনো error বা warning নেই।** |
+| `npx next typegen` ও `npx tsc --noEmit` | **PASS।** প্রথম tsc-এ preset-এর literal type নিয়ে দুটি error পাওয়া যায়; typed `useState<string>` দিয়ে ঠিক করার পর কোনো error নেই। |
+| `npm run build` | **PASS — Next.js 16.4.6 (webpack), ১৮টি static page generate, `ƒ Proxy (Middleware)` স্বীকৃত।** |
+
+### সীমাবদ্ধতা ও বাকি কাজ
+
+- **BLOCKED (live verification):** বাস্তব Supabase session দিয়ে browser-এ analyzer flow চালানো হয়নি। Backend test fixture role repository ব্যবহার করেছে; deployed backend-এ role lookup-এর জন্য সঠিক Supabase service-role configuration দরকার।
+- **BLOCKED (external services):** এই milestone-এ Judge0, LLM বা embedding provider ব্যবহার হয়নি; সেগুলোর live connectivity আগের মতোই যাচাই বাকি।
+- Complexity estimate heuristic; এটি runtime-এর গাণিতিক প্রমাণ নয়। Static findings false positive হতে পারে এবং UI-তে সেটি স্পষ্ট করা আছে।
+- Browser-level responsive behaviour ও real network failure পরিস্থিতি আলাদাভাবে manual QA করা বাকি; automated contract/type/build checks পাস করেছে।
+
+## Verification checkpoint · ১৯ নভেম্বর ২০২৬
+
+বর্তমান uncommitted worktree-এ source code, tests, migrations বা `.env` পরিবর্তন না করে verification চালানো হয়েছে। Commit, push, merge, deploy বা production database migration চালানো হয়নি। এই চেকপয়েন্টে শুধু এই ট্র্যাকার হালনাগাদ হয়েছে।
+
+| যাচাই | ফল |
+| --- | --- |
+| `backend/venv/Scripts/python.exe -m pytest backend/tests supabase/tests -q -ra` | **PASS — ১৩৬ পাস, ৩ স্কিপ, ২ deprecation warning।** ৩টি skip disposable Supabase role-isolation integration test; `CODEMENTOR_SUPABASE_TEST_WORKDIR` নেই। |
+| `npm test` (frontend) | **PASS — ৩ পাস, ০ ফেল, ০ স্কিপ।** Node শুধু `MODULE_TYPELESS_PACKAGE_JSON` performance warning দিয়েছে। |
+| `npm run lint` | **PASS — কোনো error বা warning নেই।** |
+| `npx next typegen` এবং `npx tsc --noEmit` | **PASS — কোনো TypeScript error নেই।** |
+| `npm run build` | **PASS — Next.js 16.4.6 (webpack), ১৮টি static page।** Build output `ƒ Proxy (Middleware)` হিসেবে নতুন proxy স্বীকার করেছে। |
+| `git diff --check` | **PASS — whitespace error নেই; শুধু LF→CRLF conversion warning।** |
+| Analyzer smoke test | **PASS — valid Python-এ nested loop depth 2 ও `O(n^2)`; invalid syntax line 1 রিপোর্ট করেছে।** |
+
+- `frontend/middleware.ts` ইচ্ছাকৃতভাবে মুছে দেওয়া হয়েছে। Installed Next.js 16 documentation অনুযায়ী `proxy.ts`-এ `export function proxy(...)` সঠিক convention, এবং production build এটিকে Proxy (Middleware) হিসেবে শনাক্ত করেছে। তাই middleware ফিরিয়ে আনা হয়নি।
+- কোনো genuine failure পাওয়া যায়নি; source, test বা migration file সংশোধন করা হয়নি।
+- Analyzer module এখনো কোনো API route বা dedicated test-এ যুক্ত নয় এবং analyzer UI এখনো preset; এটি test failure নয়, বাকি feature work।
+- এখনো live verification বাকি: Supabase auth/database, Judge0 execution, LLM ও embedding provider, migration `00100`, `00500`, `00600`, এবং browser-level Mentor/auth flows।
+- নিচের ১৮ নভেম্বর checkpoint-এর ১১৯-টেস্ট ফল ঐতিহাসিক; বর্তমান worktree-এর ফল ওপরের টেবিলে।
+
+## Autonomous completion checkpoint · ১৮ নভেম্বর ২০২৬
+
+ব্যবহারকারীর নতুন পূর্ণাঙ্গ নির্দেশনা অনুযায়ী Phase A–O-এর স্বাধীন নিরাপদ কাজ চালু আছে। Commit/push-এর আগে আলাদা অনুমোদন প্রয়োজন। Production migration, paid service এবং production deployment-ও অনুমোদনের অপেক্ষায় থাকবে।
+
+- **PASS** বর্তমান baseline আবার চালিয়ে ১১৯টি backend test পাস এবং ৩টি isolated Supabase test স্কিপ হয়েছে। Frontend configuration tests ৩টি পাস, lint পাস। নতুন production build চলছে।
+- **BLOCKED** frontend public key, backend service-role key এবং LLM key এখনও খালি। Loopback Judge0 `/about` এখনও অনুপলব্ধ। Docker এবং Supabase executable PATH-এ পাওয়া যায়নি।
+- বর্তমান কাজের পরের ধাপ Mentor-এর বিদ্যমান owner-scoped conversation APIs-কে UI-তে যুক্ত করা, saved messages ও curriculum sources দেখানো এবং retry/session behavior পরীক্ষা। এরপর assessment, Learning DNA, adaptive plans, analyzer, teacher management ও release verification-এর অসম্পূর্ণ কাজ চলবে।
+- `docs/FINAL_VERIFICATION_REPORT.md` সম্পূর্ণ feature matrix হিসেবে তৈরি করা বাকি। বর্তমান পর্যায়ে commit/push approval চাওয়া হয়নি।
+
+### Mentor ও RAG সংযোগের অগ্রগতি
+
+- **PASS** Mentor UI saved conversation list, পুরোনো thread খোলা, নতুন conversation, persistent conversation ID, ব্যর্থ প্রশ্ন retry এবং curriculum source links-এর সঙ্গে যুক্ত হয়েছে। একই সময় একাধিক Send বন্ধ আছে। সফল response এলে প্রশ্ন ও উত্তর chat-এ যুক্ত হয়।
+- **PASS** backend retry-তে saved answer ফিরিয়ে দেয় এবং একই request ID-তে অন্য প্রশ্ন এলে `409` দেয়। Supabase network error এখন `503` হয়। অন্য ব্যবহারকারীর conversation `404` থাকে।
+- **PASS** নতুন Mentor/RAG tests ১৬টি পাস। প্রথম পরিবর্তনের পরে platform-সহ ৪১টি পরীক্ষা পাস। Frontend lint, TypeScript ও production build পাস। এই পরীক্ষায় provider ও database fixture ব্যবহার হয়েছে।
+- **BLOCKED** বাস্তব LLM answer, real embeddings, SQL migration execution এবং authenticated browser history verification। Provider keys ও test database দরকার।
+- পরিবর্তিত ফাইল `frontend/src/app/mentor/page.tsx`, `backend/app/api/v1/endpoints/platform.py`, `backend/tests/test_mentor_conversations.py`, `backend/tests/test_curriculum.py`, `.env.example`।
+- পরের কাজ shared Mentor rate limit, SQL retry/legacy-message compatibility, then assessment ও adaptive-learning implementation। Mentor browser component regression tests এবং long-thread pagination বাকি।
+
+**Phase 0 সম্পন্ন · ১৮ নভেম্বর ২০২৬**
+
+এই ট্র্যাকারটি লোকাল কোড, টেস্ট, GitHub CI ও আগের প্রজেক্ট নথির ওপর ভিত্তি করে তৈরি। **কোডে আছে** মানে ফিচারটির বাস্তবায়ন পাওয়া গেছে। **যাচাই হয়েছে** মানে যে পরিবেশে পরীক্ষা হয়েছে তার ফল জানা আছে। বাস্তব Supabase, Judge0 ও LLM দিয়ে শুরু থেকে শেষ পর্যন্ত পরীক্ষা আলাদাভাবে বাকি আছে।
+
+## Git ও কাজের সীমা
+
+- লোকাল শাখা `feature/verified-platform-milestones`, বর্তমান commit `50532c6` (admin problem authoring)। GitHub-এর একই শাখা `01c8e48`-এ আছে। লোকাল শাখা ১ commit এগিয়ে। GitHub-এর `main` ছিল `f4ebe00`। [GitHub repository](https://github.com/shahi1437/CodeMentor_Think_First)
+- অডিট শুরুর আগে ২৮টি tracked file পরিবর্তিত ছিল, `frontend/middleware.ts` মুছে রাখা ছিল এবং ৬টি নতুন file Git-এ যোগ করা হয়নি। Staged পরিবর্তন ছিল ০। নতুন `frontend/src/proxy.ts`, auth callback, JWKS tests, curriculum module এবং mentor migration আগের লোকাল কাজের অংশ।
+- Phase 0-এর একমাত্র Git worktree সংযোজন এই ট্র্যাকার। অ্যাপের কোড, `.env` ও migration বদলানো হয়নি। কোনো commit, push, merge, deploy বা production database write করা হয়নি।
+
+## লগইন, Problem Hub ও Coding Workspace
+
+| প্রবাহ | বর্তমান ফল | পরের যাচাই |
+| --- | --- | --- |
+| Supabase login | `/auth/login` লোকাল সার্ভারে `200`। Headless Chrome-এ ফর্ম ও `Supabase is not configured` বার্তা দেখা গেছে। `frontend/.env.local`-এ publishable ও anon key দুটিই খালি। | সঠিক public key দিয়ে সাইন-ইন ও email confirmation পরীক্ষা। সেশনের পর FastAPI `/auth/me` থেকে অ্যাকাউন্টের সংরক্ষিত role নিশ্চিত করতে হবে। |
+| Problem Hub | `/problems` লোকালে `307` দিয়ে `authError=configuration` সহ লগইনে ফেরত যায়। সেশন ছাড়া FastAPI catalog `401` দেয়। কৃত্রিম student পরিচয় দিয়ে শুধু auth ধাপটি পাশ করালে বর্তমান database কনফিগে catalog `503` দেয়। | আসল student session দিয়ে প্রকাশিত catalog ও filters পরীক্ষা। catalog সত্যিই ফাঁকা হলে empty state মিলিয়ে দেখা। |
+| Coding Workspace | `/workspace/coding/[id]` একইভাবে লগইনে ফেরত যায়। কৃত্রিম student পরিচয়ে problem details ও public samples `503` দিয়েছে। একই পরীক্ষায় Run database quota যাচাই করতে গিয়ে `503` দিয়েছে। Judge0 URL-ও খালি। | আসল প্রকাশিত problem ID দিয়ে Monaco, sample, history, Run এবং Submit পরীক্ষা। hidden test data ছাত্রের response-এ অনুপস্থিত কি না যাচাই। |
+
+আগের নির্দিষ্ট error screenshot বা browser log পাওয়া যায়নি। ওপরের ফল বর্তমান লোকাল অবস্থায় দেখা গেছে। ভুল ID বা অপ্রকাশিত problem-এর ফল এবং আসল catalog-এ কয়টি problem আছে, সেগুলো live session দিয়ে যাচাই করা বাকি। [Login](../frontend/src/app/auth/login/page.tsx) · [Route protection](../frontend/src/proxy.ts) · [Problem Hub](../frontend/src/app/problems/page.tsx) · [Coding Workspace](../frontend/src/app/workspace/coding/%5Bid%5D/page.tsx) · [API](../backend/app/api/v1/endpoints/platform.py)
+
+## পরিবেশের কনফিগারেশন
+
+শুধু setting-এর নাম, উপস্থিতি এবং প্রয়োজনীয় মিল পরীক্ষা করা হয়েছে। কোনো credential value এখানে রাখা হয়নি।
+
+| জায়গা | বর্তমান অবস্থা |
+| --- | --- |
+| Frontend · `frontend/.env.local` | `NEXT_PUBLIC_SUPABASE_URL` ও `NEXT_PUBLIC_BACKEND_URL` সেট আছে। Backend URL লোকাল FastAPI-এর ঠিকানায় যায়। `NEXT_PUBLIC_API_URL` অনুপস্থিত এবং ঐচ্ছিক। `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` অথবা `NEXT_PUBLIC_SUPABASE_ANON_KEY`-এর একটি দরকার। দুটিই খালি। |
+| Backend · `backend/.env` | `SUPABASE_URL` আছে এবং frontend-এর Supabase origin-এর সঙ্গে মেলে। `SUPABASE_SERVICE_ROLE_KEY` খালি, তাই database client ও সংরক্ষিত role যাচাই চালু হচ্ছে না। `SUPABASE_JWT_SECRET` খালি। সেটি শুধু legacy HS256 সেশনের জন্য লাগে। ES256/RS256 সেশনে কোড Supabase-এর public signing keys ব্যবহার করে। প্রকল্পে আসলে কোন পদ্ধতি চালু আছে তা যাচাই করা বাকি। |
+| Judge0 · `backend/.env` | `JUDGE0_API_URL` খালি। `JUDGE0_AUTH_TOKEN`-ও খালি। token কেবল Judge0 instance-এ authentication চালু থাকলে প্রয়োজন। |
+| AI · `backend/.env` | `LLM_API_URL` ও `LLM_MODEL` সেট আছে। `LLM_API_KEY` খালি। Curriculum search-এর `LLM_EMBEDDING_URL` অনুপস্থিত। `LLM_EMBEDDING_MODEL`-এর default আছে এবং embedding key-এর জন্য chat key fallback আছে। `.env.example`-এ embedding settings নেই। |
+| Root · `.env.local` | ফাইলটিতে কয়েকটি backend-only setting-এর non-empty entry আছে, যেগুলোর বৈধতা যাচাই করা হয়নি। বর্তমান startup path-এ এই ফাইল থেকে FastAPI বা `frontend/`-এর Next.js সেটিং পড়ে না। কার্যকর ফাইল দুটিসহ বাস্তব `.env`-গুলো Git ignore করে। কেবল `.env.example` tracked। |
+
+`/health` লোকালে `200` দিয়েছে। এটি FastAPI চালু হওয়ার প্রমাণ। Email confirmation redirect allowlist, project signing mode, বাস্তব test accounts এবং external-provider connectivity অডিটে নিশ্চিত করা যায়নি। লোকাল `localhost` ও `127.0.0.1`-এর জন্য CORS defaults আছে। [Setup](../README.md) · [Config template](../.env.example) · [Backend settings](../backend/app/core/config.py)
+
+## কোডের ভিত্তি ও ফিচারের অবস্থা
+
+- **Frontend ও API ভিত্তি কোডে আছে।** Next.js App Router, React, TypeScript, Tailwind এবং Monaco দিয়ে পেজ ও editor তৈরি। FastAPI-তে typed request/response, bearer authentication, database-backed role checks ও আলাদা auth, platform এবং admin problem routes আছে। Student, Teacher ও Admin portal-এর access server যাচাই করে। সাইন-ইন ও signup সফল হওয়ার live পরীক্ষা বাকি।
+- **Problem Hub ও দুই workspace কোডে আছে।** Catalog filters, public samples, coding submission history এবং debugging hint tiers আসল backend API ব্যবহার করে। Hidden test cases grading-এর জন্য server-এ নেওয়া হয়। Verified revision থাকলে তবেই buggy starter student response-এ আসে। Catalog-এর baseline schema fallback unit test-এ আছে। বাস্তব catalog ও দুই workspace-এর সফল flow যাচাই বাকি।
+- **Judge0 ও admin authoring আংশিক যাচাই হয়েছে।** Python, JavaScript ও C++ execution wrapper, resource limits, server-side grading এবং database-backed shared quota আছে। Admin draft create/edit, publish/unpublish/archive এবং reference solution ও buggy variant যাচাইয়ের flow commit `50532c6`-এ আছে। Admin flow পরীক্ষায় service fixture ছিল। Live Judge0 ও সংশ্লিষ্ট database migration-এর পরীক্ষা বাকি।
+- **Database foundation কোডে আছে।** Supabase Auth/profile, problem/test case, submission, learning, daily plan, course/enrollment, mentor ও vector tables-এর schema আছে। ৫টি baseline ও নতুন ৫টি migration মিলে লোকালে ১০টি। নতুনগুলোর বিষয় course-scoped RLS (`00100`), client grants (`00200`), quota (`00300`), authoring (`00400`) ও mentor/curriculum (`00500`)। পুরোনো production audit-এ baseline ৫টির schema ও migration history যাচাই হয়েছিল এবং teacher read scope ও student direct submission write নিয়ে সমস্যা ধরা পড়েছিল। বর্তমান production role policy ও নতুন migration history এই Phase 0-তে পুনরায় যাচাই করা হয়নি। [আগের Supabase audit](SUPABASE_MIGRATION_RECONCILIATION.md)
+- **AI Mentor আংশিক বাস্তবায়িত।** LLM chat, Socratic/conceptual mode ও Learning DNA context কোডে আছে। লোকাল পরিবর্তনে conversation persistence, owner-scoped API, admin curriculum ingestion ও pgvector retrieval আছে। এর SQL migration এখনো লোকাল untracked file। Mentor UI conversation ID ব্যবহার করে thread চালানো, saved thread আবার খোলা ও curriculum sources দেখানোর সঙ্গে যুক্ত হয়নি। Embedding provider, বাস্তব licensed curriculum এবং retrieval পরীক্ষা বাকি। পরিকল্পিত সাধারণ LLM tool-calling loop পাওয়া যায়নি।
+- **ML ও Learning DNA।** Scikit-learn ও keyword-ভিত্তিক classifier আছে এবং ছোট in-code sample সেটে চলে। বাস্তব dataset, held-out evaluation ও debugging flow-তে নির্ভরযোগ্য classifier integration বাকি। Learning DNA, student dashboard, daily-task completion এবং submission history সংরক্ষিত student data থেকে পড়ার জন্য যুক্ত। Adaptive challenge selection ও personalized plan creation পাওয়া যায়নি।
+- **Teacher, Admin ও demo pages।** Teacher নিজের course ও active enrollment count দেখতে পারে। Admin dashboard database counts পড়ে। Course-to-problem assignment link, student-level teacher analytics ও alerts, এবং course management UI বাকি। Visual Code Analyzer ও Diagnostic Assessment-এ চিহ্নিত demo/preset content আছে। বাস্তব code analysis ও সংরক্ষিত placement results-এর flow বাকি।
+
+## পরীক্ষা ও CI
+
+| যাচাই | Phase 0 ফল |
+| --- | --- |
+| `python -m pytest backend/tests supabase/tests -q -ra -p no:cacheprovider` | **১০৫ পাস, ৩ স্কিপ, ২ deprecation warning।** Backend suite-এ JWT/RBAC, database access, grading privacy, hints, Judge0 wrapper, quota, admin authoring ও Mentor request tests আছে। Disposable Supabase stack না থাকায় role-isolation, grading privacy এবং atomic quota-এর ৩টি database integration test লোকালে স্কিপ হয়েছে। |
+| `npm run lint`, TypeScript `--noEmit`, `npm run build` | সব পাস। বর্তমান frontend env দিয়েও build পাস। স্বতন্ত্র frontend unit/component/E2E suite বা CI job পাওয়া যায়নি। এই অডিটে লোকাল Next.js ও headless Chrome দিয়ে login notice এবং route redirects পরীক্ষা হয়েছে। |
+| Migration versions ও `git diff --check` | ১০টি numeric version আলাদা। বিদ্যমান Git diff-এর whitespace check পাস। Migration filename check দিয়ে SQL execution যাচাই হয় না। |
+| GitHub Actions | Remote branch-এর `01c8e48`-এ backend, frontend, migrations এবং disposable Supabase role-isolation job সব পাস। লোকাল `50532c6` এবং uncommitted পরিবর্তন ওই run-এর পরে এসেছে। Workflow checks চালায়। কোনো deploy job নেই। [GitHub Actions run](https://github.com/shahi1437/CodeMentor_Think_First/actions/runs/44221197351) |
+
+লোকাল টেস্টে backend virtual environment-এর Python 3.14 ও Node 26 ব্যবহার হয়েছে। CI ব্যবহার করে Python 3.11 ও Node 22। Real Supabase sign-in, live Judge0 verdict ও live LLM answer কোনওটিই এই টেস্টের ফল হিসেবে ধরা হয়নি। [CI workflow](../.github/workflows/ci.yml) · [Supabase tests](../supabase/tests/test_role_isolation.py)
+
+## Phase অনুযায়ী ট্র্যাকার
+
+Phase 1–10-এর বিষয়গুলো আগের `IMPLEMENTATION_STATUS.md`-এর নম্বর অনুসরণ করে। পরের কাজের চূড়ান্ত scope ব্যবহারকারীর পরবর্তী নির্দেশনা থেকে আসবে।
+
+| Phase | বর্তমান অবস্থা | সম্পূর্ণ বলতে যে প্রমাণ দরকার |
+| --- | --- | --- |
+| 0 · Project audit | **সম্পন্ন** | Git ও কোড পর্যালোচনা, config audit, লোকাল tests ও route checks, hosted CI এবং এই ট্র্যাকার। |
+| 1 · Backend auth foundation | **কোডে আছে, লোকাল টেস্ট পাস** | আসল token যাচাই এবং student/teacher/admin profile access পরীক্ষা। |
+| 2 · Frontend Supabase auth | **আংশিক যাচাই** | সঠিক public key, signup confirmation, login/redirect/sign-out এবং protected page browser flow। |
+| 3 · Database ও APIs | **আংশিক যাচাই** | isolated stack-এ বর্তমান ১০টি migration প্রয়োগ ও account access পরীক্ষা। Production-এর ইতিহাস/নীতি যাচাই আলাদা অনুমোদনের অধীন। |
+| 4 · Monaco ও Judge0 execution | **আংশিক যাচাই** | live Run/Submit, shared quota এবং service failure-এর যথাযথ status। |
+| 5 · Problem Hub, workspaces ও authoring | **আংশিক যাচাই** | অনুমোদিত problem seed, admin publish verification, samples/history এবং verified debugging variant-এর পূর্ণ flow। |
+| 6 · ML classifier | **প্রাথমিক বাস্তবায়ন** | অনুমোদিত বাস্তব dataset, পুনরায় চালানো যায় এমন training/evaluation এবং debugging integration। |
+| 7 · AI Mentor ও RAG | **আংশিক বাস্তবায়ন** | নতুন SQL, thread UI ও source display, licensed curriculum এবং live chat/embedding/retrieval tests। |
+| 8 · Learning DNA | **মূল ফিচার কোডে আছে** | বাস্তব student data দিয়ে summary যাচাই, mastery-চালিত challenge ও plan generation। |
+| 9 · Dashboards ও analytics | **আংশিক বাস্তবায়ন** | course/problem assignment, scope-checked teacher analytics এবং alert flows। |
+| 10 · Release readiness | **যাচাই বাকি** | বর্তমান পরিবর্তনে CI ও external-service smoke tests, configuration review এবং প্রয়োজনীয় release approval। |
+
+## ডকুমেন্টেশন মিলিয়ে দেখা
+
+- `README.md`, `IMPLEMENTATION_STATUS.md`, `IMPLEMENTATION_CHECKLIST.md`, `EXECUTION_STATE.md` ও `AI_HANDOFF.md`-তে পুরোনো branch, ৮০টি টেস্ট, read-only admin authoring, shared quota বা RAG-এর আগের অবস্থা উল্লেখ আছে। লোকাল কোড ও hosted CI-এর নতুন তথ্য এই ট্র্যাকারে নথিভুক্ত। Git ইতিহাসে PR #8 merge রয়েছে। [Implementation status](IMPLEMENTATION_STATUS.md) · [Checklist](IMPLEMENTATION_CHECKLIST.md) · [Execution state](EXECUTION_STATE.md) · [Handoff](AI_HANDOFF.md)
+- `PAGE_MAP.md` ও `DESIGN_SYSTEM.md` পেজ, UI states ও ফিচারের পরিকল্পনা বর্ণনা করে। `DECISIONS_LOG.md` test privacy, role verification এবং Judge0 ফলের নীতি ধরে রেখেছে। [Page map](PAGE_MAP.md) · [Design system](DESIGN_SYSTEM.md) · [Decisions](DECISIONS_LOG.md)
+
+## Phase 1 · Runtime fixes · ১৮ নভেম্বর ২০২৬
+
+**অবস্থা — BLOCKED।** নিরাপদ কোড পরিবর্তন ও লোকাল পরীক্ষা সম্পন্ন। আসল Supabase account এবং Judge0 দিয়ে সফল flow যাচাই বাকি। এই বিভাগ Phase 0-এর কনফিগারেশন ও পরীক্ষার ফলের পরের অবস্থা দেখায়।
+
+| যাচাই | ফল ও প্রমাণ |
+| --- | --- |
+| লোকাল কনফিগারেশন | **PASS।** `frontend/.env.local`-এর Supabase URL `backend/.env`-এর URL-এর সঙ্গে মেলে। সক্রিয় frontend backend URL লোকাল FastAPI port `8000`-এ যায়। সক্রিয় `backend/.env`-এ root `.env.local`-এ আগে থেকে থাকা loopback Judge0 URL যোগ হয়েছে। অন্য `.env` entry বদলায়নি। Judge0-এর লোকাল `/about` উত্তর দেয়নি। |
+| JWT ও role | **PASS।** প্রকল্পের public JWKS `200` দিয়েছে এবং ES256 key প্রকাশ করছে। ES256, RS256 ও legacy HS256 regression tests-এ signature, issuer, audience এবং persisted role যাচাই হয়েছে। Project URL না থাকলে HS256 verification বন্ধ থাকে। অনুপস্থিত service-role key ও role lookup failure-এর জন্য আলাদা বার্তা আছে। |
+| Browser auth | **PASS** লোকাল Next.js-এ login এবং signup পেজ `200`, Chrome-এ login-এর missing configuration বার্তা দেখা গেছে। Problem Hub, Coding Workspace, Teacher এবং Admin route লগইনে `307` দিয়েছে। Confirmation code ছাড়া callback লগইনে ফেরত গেছে। **BLOCKED** আসল login, signup, confirmation, logout এবং reload-এর পরে session persistence। |
+| Problem Hub ও Coding Workspace | **PASS** test fixture-এ missing database config `503`, connection failure `503` এবং সফল empty catalog `200 []` আলাদা হয়েছে। লোকাল HTTP-তে অতিথির catalog, details, samples, admin এবং Run request `401`। বিদ্যমান filter, Monaco ও submission history রাখা হয়েছে। **BLOCKED** আসল role/profile query, প্রকাশিত problem ID, samples ও ইতিহাস দিয়ে পূর্ণ flow। |
+| Run | **PASS** Judge0 URL অনুপস্থিত থাকলে API স্পষ্ট `unconfigured` ফল দেয় এবং quota খরচ করে না। URL সেট থাকলে quota যাচাই এখনও বাধ্যতামূলক। **BLOCKED** sandbox চালু করে `/about`, quota RPC ও live Run/Submit verdict যাচাই। |
+| লোকাল পরীক্ষা | **PASS** `pytest backend/tests supabase/tests`-এ ১১৯ পাস, ৩ স্কিপ, ২ deprecation warning। Disposable Supabase নেই বলে ৩টি SQL/role test লোকালে **NOT TESTED**। `npm test`-এ ৩ পাস, lint, `tsc --noEmit` ও production build পাস। Uvicorn `/health` `200`। দুই লোকাল frontend origin-এর CORS `200`, অন্য origin-এর preflight `400`। |
+| Git ও CI | **PASS** whitespace check। শাখা remote-tracking branch থেকে ১ commit এগিয়ে। বর্তমান পরিবর্তনের hosted CI **NOT TESTED**। কোনো commit, push, merge, deploy বা production database migration করা হয়নি। |
+
+### ম্যানুয়াল কনফিগারেশন বাকি
+
+1. বিদ্যমান Supabase project-এর **Settings → API Keys** থেকে `frontend/.env.local`-এ `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` বসান। Legacy public key ব্যবহার করলে `NEXT_PUBLIC_SUPABASE_ANON_KEY` বসান। Backend private key এই ফাইলে রাখবেন না। [Supabase API keys](https://supabase.com/docs/guides/getting-started/api-keys)
+2. একই project-এর `service_role` key কেবল `backend/.env`-এর `SUPABASE_SERVICE_ROLE_KEY`-তে বসান। ES256 সেশনে `SUPABASE_JWT_SECRET` খালি রাখা যায়। পুরোনো HS256 সেশন ব্যবহার করলে তবেই সেই setting-এ legacy JWT secret লাগবে। [Supabase signing keys](https://supabase.com/docs/guides/auth/signing-keys)
+3. Email confirmation চালু থাকলে **Authentication → URL Configuration**-এ যে origin দিয়ে signup শুরু করবেন তার `/auth/callback` যোগ করুন। লোকাল app restart করুন। আসল sign-in যাচাইয়ের জন্য অনুমোদিত test account, আর workspace যাচাইয়ের জন্য প্রকাশিত test problem দরকার।
+4. লোকাল Judge0 CE চালু করুন, অথবা অনুমোদিত instance-এর URL `backend/.env`-এর `JUDGE0_API_URL`-এ দিন। Instance token চাইলে সেখানেই `JUDGE0_AUTH_TOKEN` বসান। Quota RPC-এর উপস্থিতি test database-এ যাচাই করা বাকি।
+
+### Phase 1-এ পরিবর্তিত ফাইল
+
+- Backend · `app/core/{auth,config,database,role_store,judge0,execution_quota}.py`, `app/api/v1/endpoints/platform.py` এবং সক্রিয়, Git-ignored `backend/.env`।
+- Frontend · `src/lib/backend-url.ts`, `src/lib/backend.ts`, `src/lib/supabase/config.ts`, `src/app/auth/register/page.tsx`, `src/components/layout/Navbar.tsx`, `src/app/workspace/coding/[id]/page.tsx` ও `package.json`।
+- Tests ও নথি · `backend/tests/{conftest,test_auth,test_unit_auth,test_jwks_auth,test_platform_services,test_execution_quota}.py`, `frontend/tests/runtime-config.test.mjs`, `.github/workflows/ci.yml`, `README.md` এবং এই ট্র্যাকার।

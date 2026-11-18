@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Send,
   Bot,
@@ -8,7 +8,30 @@ import {
   Lightbulb,
 } from 'lucide-react';
 import { AppShell } from '@/components/layout/AppShell';
-import { getSupabaseBrowserClient } from '@/lib/supabase/client';
+import { backendRequest } from '@/lib/backend';
+
+interface Source {
+  id: string;
+  title: string;
+  source_url: string | null;
+  license: string;
+}
+
+interface Conversation {
+  id: string;
+  topic: string;
+  status: string;
+  mode: 'socratic' | 'conceptual';
+  updated_at: string;
+}
+
+interface SavedMessage {
+  id: string;
+  message_kind: 'user' | 'assistant';
+  message: string;
+  created_at: string;
+  sources: Source[];
+}
 
 interface Message {
   id: string;
@@ -16,6 +39,7 @@ interface Message {
   text: string;
   timestamp: string;
   source?: string;
+  sources?: Source[];
 }
 
 export default function AIMentorPage() {
@@ -25,15 +49,75 @@ export default function AIMentorPage() {
   const [errorMessage, setErrorMessage] = useState('');
   const [mode, setMode] = useState<'socratic' | 'conceptual'>('socratic');
   const nextMessageId = useRef(0);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [historyError, setHistoryError] = useState('');
+  const [threadLoading, setThreadLoading] = useState(false);
+  const [closed, setClosed] = useState(false);
+  const busy = useRef(false);
+  const pending = useRef<{ question: string; mode: string; requestId: string } | null>(null);
+
+  const loadConversations = useCallback(async () => {
+    setHistoryLoading(true);
+    setHistoryError('');
+    try {
+      const records = await backendRequest<Conversation[]>('/platform/mentor/conversations');
+      if (!Array.isArray(records)) throw new Error('Saved conversations could not be loaded.');
+      setConversations(records);
+    } catch (error) {
+      setHistoryError(error instanceof Error ? error.message : 'Saved conversations could not be loaded.');
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { void Promise.resolve().then(loadConversations); }, [loadConversations]);
+
+  const openConversation = async (id: string) => {
+    if (busy.current) return;
+    busy.current = true;
+    setThreadLoading(true);
+    setErrorMessage('');
+    try {
+      const thread = await backendRequest<Conversation & { messages: SavedMessage[] }>(
+        `/platform/mentor/conversations/${encodeURIComponent(id)}`,
+      );
+      if (!Array.isArray(thread.messages)) throw new Error('This conversation could not be loaded.');
+      setMessages(thread.messages.map((message) => ({
+        id: message.id, sender: message.message_kind, text: message.message,
+        timestamp: new Date(message.created_at).toLocaleString(), sources: message.sources,
+      })));
+      setConversationId(thread.id);
+      setMode(thread.mode);
+      setClosed(thread.status !== 'open');
+      setInput('');
+      pending.current = null;
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'This conversation could not be loaded.');
+    } finally {
+      busy.current = false;
+      setThreadLoading(false);
+    }
+  };
+
+  const newConversation = () => {
+    if (busy.current) return;
+    setMessages([]);
+    setConversationId(null);
+    setClosed(false);
+    setInput('');
+    setErrorMessage('');
+    pending.current = null;
+  };
 
   const handleSend = async (textToSend?: string) => {
     const userText = (textToSend ?? input).trim();
-    if (!userText.trim()) return;
-
-    const history = messages.slice(-12).map((message) => ({
-      role: message.sender,
-      content: message.text,
-    }));
+    if (!userText || busy.current || closed) return;
+    busy.current = true;
+    if (pending.current?.question !== userText || pending.current.mode !== mode) {
+      pending.current = { question: userText, mode, requestId: crypto.randomUUID() };
+    }
     const timestamp = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
     const userMessage: Message = {
       id: `u-${nextMessageId.current++}`,
@@ -42,56 +126,43 @@ export default function AIMentorPage() {
       timestamp,
     };
 
-    setMessages((previous) => [...previous, userMessage]);
-    setInput('');
     setIsTyping(true);
     setErrorMessage('');
 
     try {
-      const supabase = getSupabaseBrowserClient();
-      if (!supabase) {
-        throw new Error('Supabase authentication is not configured. Configure the browser Supabase URL and anon key.');
-      }
-
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      if (sessionError || !session?.access_token) {
-        throw new Error('Sign in to ask the AI Mentor.');
-      }
-
-      const backendUrl = process.env.NEXT_PUBLIC_API_URL
-        || process.env.NEXT_PUBLIC_BACKEND_URL
-        || 'http://localhost:8000';
-      const response = await fetch(`${backendUrl}/api/v1/platform/mentor`, {
+      const result = await backendRequest<{
+        answer: string; conversation_id: string; source: string; sources: Source[];
+      }>('/platform/mentor', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${session.access_token}`,
-        },
         body: JSON.stringify({
           question: userText,
           topic: 'debugging',
           mode,
-          history,
+          conversation_id: conversationId,
+          request_id: pending.current.requestId,
         }),
       });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(result?.detail || `The AI Mentor request failed (${response.status}).`);
-      }
       if (typeof result?.answer !== 'string' || !result.answer.trim()) {
         throw new Error('The AI Mentor returned an empty response. Please try again.');
       }
 
-      setMessages((previous) => [...previous, {
+      setMessages((previous) => [...previous, userMessage, {
         id: `a-${nextMessageId.current++}`,
         sender: 'assistant',
         text: result.answer,
         timestamp: new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
         source: result.source,
+        sources: result.sources,
       }]);
+      setConversationId(result.conversation_id);
+      setInput('');
+      pending.current = null;
+      void loadConversations();
     } catch (error) {
+      setInput(userText);
       setErrorMessage(error instanceof Error ? error.message : 'Unable to reach the AI Mentor. Please try again.');
     } finally {
+      busy.current = false;
       setIsTyping(false);
     }
   };
@@ -143,6 +214,24 @@ export default function AIMentorPage() {
           </div>
         </div>
 
+        <section aria-label="Saved conversations" className="mt-5 space-y-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <button onClick={newConversation} disabled={isTyping || threadLoading} className="rounded-lg bg-indigo-600 px-3 py-2 text-xs text-white disabled:opacity-50">New conversation</button>
+            <button onClick={() => void loadConversations()} disabled={historyLoading} className="text-xs text-indigo-300">Refresh history</button>
+            {historyLoading && <span role="status" className="text-xs text-slate-400">Loading conversations…</span>}
+          </div>
+          {historyError && <p role="alert" className="text-xs text-rose-300">{historyError}</p>}
+          {!historyLoading && !historyError && conversations.length === 0 && <p className="text-xs text-slate-400">Your saved conversations will appear here.</p>}
+          {conversations.length > 0 && <label className="block text-xs text-slate-300">Saved conversation
+            <select value={conversationId ?? ''} disabled={isTyping || threadLoading} onChange={(event) => { if (event.target.value) void openConversation(event.target.value); }} className="mt-2 block w-full rounded-lg border border-slate-700 bg-slate-900 p-2">
+              <option value="">Choose a conversation</option>
+              {conversations.map((conversation) => <option key={conversation.id} value={conversation.id}>{conversation.topic} · {new Date(conversation.updated_at).toLocaleString()}</option>)}
+            </select>
+          </label>}
+          {threadLoading && <p role="status" className="text-xs text-slate-300">Loading messages…</p>}
+          {closed && <p className="text-xs text-amber-300">This conversation is closed. Start a new conversation to continue.</p>}
+        </section>
+
         {/* Chat Thread Container */}
         <div className="mt-6 flex flex-col h-[520px] rounded-2xl border border-slate-800 bg-navy-900/60 overflow-hidden backdrop-blur-md">
           {/* Messages Scroll Area */}
@@ -177,6 +266,13 @@ export default function AIMentorPage() {
                   }`}
                 >
                   <p className="whitespace-pre-line">{m.text}</p>
+                  {!!m.sources?.length && <ul className="mt-3 space-y-1 border-t border-slate-700 pt-2">
+                    {m.sources.map((source, index) => <li key={source.id}>
+                      [{index + 1}] {source.source_url && /^https?:\/\//i.test(source.source_url)
+                        ? <a href={source.source_url} target="_blank" rel="noopener noreferrer" className="text-indigo-300 underline">{source.title}</a>
+                        : source.title} · {source.license}
+                    </li>)}
+                  </ul>}
                   <span className="block mt-2 text-[10px] opacity-60 text-right">
                     {m.timestamp}{m.source ? ` · ${m.source}` : ''}
                   </span>
@@ -213,7 +309,7 @@ export default function AIMentorPage() {
               <button
                 key={idx}
                 onClick={() => handleSend(chip)}
-                disabled={isTyping}
+                disabled={isTyping || threadLoading || closed}
                 className="rounded-full border border-slate-800 bg-slate-900 px-3 py-1 text-slate-300 hover:border-slate-700 hover:text-white flex-shrink-0 transition-colors"
               >
                 {chip}
@@ -225,6 +321,8 @@ export default function AIMentorPage() {
           <div className="p-3 border-t border-slate-800 bg-navy-950 flex items-center gap-2">
             <input
               type="text"
+              aria-label="Question for the Mentor"
+              disabled={isTyping || threadLoading || closed}
               placeholder="Ask a question or explain your debugging reasoning..."
               value={input}
               maxLength={4000}
@@ -239,7 +337,7 @@ export default function AIMentorPage() {
             />
             <button
               onClick={() => void handleSend()}
-              disabled={!input.trim() || isTyping}
+              disabled={!input.trim() || isTyping || threadLoading || closed}
               aria-label="Send question to AI Mentor"
               className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-md hover:bg-indigo-500 disabled:opacity-40 transition-colors"
             >

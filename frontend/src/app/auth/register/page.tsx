@@ -6,13 +6,15 @@ import { useRouter } from 'next/navigation';
 import { ArrowRight, CheckCircle2, Code2, Sparkles } from 'lucide-react';
 import { AppShell } from '@/components/layout/AppShell';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
+import { supabaseConfigMessage } from '@/lib/supabase/config';
+import { getVerifiedRole, portalDestination } from '@/lib/auth';
 
 export default function RegisterPage() {
   const router = useRouter();
   const [step, setStep] = useState(1);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('Secret123!');
+  const [password, setPassword] = useState('');
   const [primaryLang, setPrimaryLang] = useState('python');
   const [goal, setGoal] = useState('pass_interviews');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -25,23 +27,18 @@ export default function RegisterPage() {
     setErrorMessage('');
     setSuccessMessage('');
 
-    const supabase = getSupabaseBrowserClient();
-    if (!supabase) {
-      setErrorMessage('Supabase is not configured. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.');
-      setIsSubmitting(false);
-      return;
-    }
-
     try {
-      const { error } = await supabase.auth.signUp({
+      const supabase = getSupabaseBrowserClient();
+      if (!supabase) throw new Error(supabaseConfigMessage);
+      const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: {
+          emailRedirectTo: new URL('/auth/callback', window.location.origin).href,
           data: {
             full_name: name,
             preferred_language: primaryLang,
             learning_goal: goal,
-            role: 'student',
           },
         },
       });
@@ -52,8 +49,12 @@ export default function RegisterPage() {
         return;
       }
 
-      setSuccessMessage('Account created successfully. Please check your email to confirm registration, then sign in.');
-      setTimeout(() => router.push('/auth/login'), 900);
+      if (data.session) {
+        const role = await getVerifiedRole(data.session.access_token);
+        router.replace(portalDestination(role));
+        return;
+      }
+      setSuccessMessage('Check your email for the confirmation link to continue.');
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Unexpected error during registration.');
     } finally {
@@ -75,7 +76,7 @@ export default function RegisterPage() {
             </div>
 
             {step === 1 ? (
-              <div>
+              <form onSubmit={(event) => { event.preventDefault(); setStep(2); }}>
                 <div className="text-center">
                   <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-600/20 text-indigo-400 border border-indigo-500/30">
                     <Code2 className="h-6 w-6" />
@@ -115,6 +116,7 @@ export default function RegisterPage() {
                     <label className="text-xs font-medium text-slate-300">Password</label>
                     <input
                       type="password"
+                      autoComplete="new-password"
                       placeholder="Create a strong password"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
@@ -130,15 +132,14 @@ export default function RegisterPage() {
                   )}
 
                   <button
-                    type="button"
-                    onClick={() => setStep(2)}
+                    type="submit"
                     className="w-full mt-2 flex items-center justify-center gap-2 rounded-xl bg-indigo-600 py-2.5 text-xs font-bold text-white hover:bg-indigo-500 transition-colors"
                   >
                     <span>Continue to Learning Profile</span>
                     <ArrowRight className="h-4 w-4" />
                   </button>
                 </div>
-              </div>
+              </form>
             ) : (
               <form onSubmit={handleComplete}>
                 <h2 className="text-2xl font-bold tracking-tight text-white">Customize Your Learning Path</h2>
@@ -192,6 +193,11 @@ export default function RegisterPage() {
                     </div>
                   </div>
 
+                  {errorMessage && (
+                    <div role="alert" className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-2.5 text-xs text-rose-300">
+                      {errorMessage}
+                    </div>
+                  )}
                   {successMessage && (
                     <div className="flex items-center gap-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 p-2.5 text-xs text-emerald-300">
                       <CheckCircle2 className="h-4 w-4 flex-shrink-0" />

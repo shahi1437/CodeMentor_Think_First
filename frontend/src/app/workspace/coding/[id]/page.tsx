@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import { AppShell } from '@/components/layout/AppShell';
 import { CodeEditor } from '@/components/ui/CodeEditor';
-import { getSupabaseBrowserClient } from '@/lib/supabase/client';
+import { backendRequest, type PlatformRunResult } from '@/lib/backend';
 
 type Language = 'python' | 'javascript' | 'cpp';
 interface ProblemRecord {
@@ -41,20 +41,14 @@ interface SubmissionRecord {
   created_at: string;
 }
 
-const backendUrl =
-  process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_BACKEND_URL || '';
 const languages: Language[] = ['python', 'javascript', 'cpp'];
 
-async function getAccessToken() {
-  const supabase = getSupabaseBrowserClient();
-  if (!supabase) {
-    throw new Error('Supabase authentication is not configured in this environment.');
-  }
-  const { data: { session }, error } = await supabase.auth.getSession();
-  if (error || !session?.access_token) {
-    throw new Error('A valid user session is required to access the problem workspace.');
-  }
-  return session.access_token;
+async function getSubmissionHistory(problemId: string) {
+  const history = await backendRequest<SubmissionRecord[]>(
+    `/platform/submissions?problem_id=${encodeURIComponent(problemId)}`,
+  );
+  if (!Array.isArray(history)) throw new Error('The server returned invalid submission history.');
+  return history;
 }
 
 export default function NormalCodingWorkspace() {
@@ -100,31 +94,18 @@ export default function NormalCodingWorkspace() {
       setProblemLoading(true);
       setProblemError(null);
       try {
-        if (!backendUrl) throw new Error('Set NEXT_PUBLIC_API_URL or NEXT_PUBLIC_BACKEND_URL to connect to the backend.');
-        const accessToken = await getAccessToken();
-        const headers = { Authorization: `Bearer ${accessToken}` };
-        const [problemResponse, samplesResponse] = await Promise.all([
-          fetch(`${backendUrl}/api/v1/platform/problems/${encodeURIComponent(problemId)}`, { headers }),
-          fetch(`${backendUrl}/api/v1/platform/problems/${encodeURIComponent(problemId)}/samples`, { headers }),
-        ]);
-        const problemBody = await problemResponse.json().catch(() => null);
-        const samplesBody = await samplesResponse.json().catch(() => null);
-        if (!problemResponse.ok) {
-          throw new Error(problemBody?.detail || 'Unable to load this problem.');
-        }
-        if (!samplesResponse.ok) {
-          throw new Error(samplesBody?.detail || 'Unable to load sample test cases.');
-        }
-        if (!problemBody || !Array.isArray(samplesBody)) {
-          throw new Error('The server returned invalid problem data.');
-        }
-        if (problemBody.problem_mode === 'debugging') {
+        const problemPath = `/platform/problems/${encodeURIComponent(problemId)}`;
+        const record = await backendRequest<ProblemRecord>(problemPath);
+        if (!record?.id) throw new Error('The server returned invalid problem data.');
+        if (record.problem_mode === 'debugging') {
           throw new Error('This problem is available in Debugging Mode.');
         }
+        const samples = await backendRequest<SampleCase[]>(problemPath + '/samples');
+        if (!Array.isArray(samples)) throw new Error('The server returned invalid sample data.');
         if (active) {
-          const record = problemBody as ProblemRecord;
           setProblem(record);
-          setSampleCases(samplesBody as SampleCase[]);
+          setSampleCases(samples);
+          setActiveTestCaseTab(0);
           const nextLanguage = (record.supported_languages || []).find((item) =>
             languages.includes(item as Language),
           ) as Language | undefined;
@@ -146,46 +127,26 @@ export default function NormalCodingWorkspace() {
   }, [problemId]);
 
   useEffect(() => {
-    if (!problem) return;
+    if (!problem || problemLoading || problemError) return;
     let active = true;
     const loadHistory = async () => {
       setHistoryError(null);
       try {
-        const accessToken = await getAccessToken();
-        const response = await fetch(`${backendUrl}/api/v1/platform/submissions`, {
-          headers: { Authorization: `Bearer ${accessToken}` },
-        });
-        const body = await response.json().catch(() => null);
-        if (!response.ok) throw new Error(body?.detail || 'Unable to load submission history.');
-        if (active && Array.isArray(body)) {
-          setSubmissionHistory(body.filter((item: SubmissionRecord) => item.problem_id === problemId));
-        }
+        const history = await getSubmissionHistory(problem.id);
+        if (active) setSubmissionHistory(history);
       } catch (error) {
         if (active) setHistoryError(error instanceof Error ? error.message : 'Unable to load submission history.');
       }
     };
     void loadHistory();
     return () => { active = false; };
-  }, [problem, problemId]);
+  }, [problem, problemLoading, problemError]);
 
   const runPlatformRequest = async (endpoint: 'execute' | 'submit', payload: Record<string, unknown>) => {
-    if (!backendUrl) throw new Error('Set NEXT_PUBLIC_API_URL or NEXT_PUBLIC_BACKEND_URL to connect to the backend.');
-    const accessToken = await getAccessToken();
-    const response = await fetch(`${backendUrl}/api/v1/platform/${endpoint}`, {
+    return backendRequest<PlatformRunResult>(`/platform/${endpoint}`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${accessToken}`,
-      },
       body: JSON.stringify(payload),
     });
-
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      throw new Error(data?.detail || `The backend request failed with status ${response.status}.`);
-    }
-
-    return data;
   };
 
   const handleRunSampleTests = async () => {
@@ -237,7 +198,7 @@ export default function NormalCodingWorkspace() {
       });
     } catch (error) {
       setExecutionResult({
-        status: 'configuration_error',
+        status: 'error',
         message: error instanceof Error ? error.message : 'Unable to reach the backend execution service.',
       });
     } finally {
@@ -289,16 +250,8 @@ export default function NormalCodingWorkspace() {
         totalTestCount: result.total_test_count,
       });
       try {
-        const accessToken = await getAccessToken();
-        const historyResponse = await fetch(`${backendUrl}/api/v1/platform/submissions`, {
-          headers: { Authorization: `Bearer ${accessToken}` },
-        });
-        const historyBody = await historyResponse.json().catch(() => null);
-        if (!historyResponse.ok) throw new Error(historyBody?.detail || 'Unable to refresh submission history.');
-        if (Array.isArray(historyBody)) {
-          setSubmissionHistory(historyBody.filter((item: SubmissionRecord) => item.problem_id === problemId));
-          setHistoryError(null);
-        }
+        setSubmissionHistory(await getSubmissionHistory(problem.id));
+        setHistoryError(null);
       } catch (error) {
         setHistoryError(error instanceof Error ? error.message : 'Unable to refresh submission history.');
       }

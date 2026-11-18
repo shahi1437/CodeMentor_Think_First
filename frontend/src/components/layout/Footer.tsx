@@ -38,10 +38,10 @@ export const Footer: React.FC = () => {
             <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-200">Learning Modes</h4>
             <ul className="mt-3 space-y-2 text-xs">
               <li>
-                <Link href="/workspace/coding/p-1" className="hover:text-indigo-400 transition-colors">Normal Coding Workspace</Link>
+                <Link href="/problems?mode=normal" className="hover:text-indigo-400 transition-colors">Normal Coding Workspace</Link>
               </li>
               <li>
-                <Link href="/workspace/debugging/p-3" className="hover:text-indigo-400 transition-colors">Debugging Lab</Link>
+                <Link href="/problems?mode=debugging" className="hover:text-indigo-400 transition-colors">Debugging Lab</Link>
               </li>
               <li>
                 <Link href="/problems" className="hover:text-indigo-400 transition-colors">Problem Hub</Link>

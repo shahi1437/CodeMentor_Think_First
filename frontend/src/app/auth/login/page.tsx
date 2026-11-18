@@ -1,34 +1,43 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { Suspense, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { ArrowRight, CheckCircle2, Code2, GraduationCap, Shield, User } from 'lucide-react';
 import { AppShell } from '@/components/layout/AppShell';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
-import { normalizeRole, setStoredSession } from '@/lib/auth';
+import { getVerifiedRole, portalDestination } from '@/lib/auth';
+import { getSupabaseConfig, supabaseConfigMessage } from '@/lib/supabase/config';
 import { Role } from '@/types';
 
-const defaultCredentials: Record<Role, { email: string; password: string }> = {
-  student: { email: 'student@codementor.ai', password: 'Secret123!' },
-  teacher: { email: 'teacher@codementor.ai', password: 'Secret123!' },
-  admin: { email: 'admin@codementor.ai', password: 'Secret123!' },
+const authMessages: Record<string, string> = {
+  configuration: supabaseConfigMessage,
+  unavailable: 'Account verification is unavailable. Check the FastAPI and Supabase configuration and try again.',
+  profile: 'Your account needs an active CodeMentor profile. Contact an administrator.',
+  confirmation: 'The confirmation session could not be opened. If your email was confirmed, sign in below.',
 };
 
 export default function LoginPage() {
+  return (
+    <Suspense fallback={<AppShell hideFooter><p className="p-8 text-center">Loading sign-in…</p></AppShell>}>
+      <LoginForm />
+    </Suspense>
+  );
+}
+
+function LoginForm() {
   const router = useRouter();
-  const [email, setEmail] = useState(defaultCredentials.student.email);
-  const [password, setPassword] = useState(defaultCredentials.student.password);
+  const search = useSearchParams();
+  const authError = search.get('authError');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [selectedRole, setSelectedRole] = useState<Role>('student');
   const [isLoading, setIsLoading] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
-  const [errorMsg, setErrorMsg] = useState('');
-
-  const handleQuickLogin = (role: Role) => {
-    setSelectedRole(role);
-    setEmail(defaultCredentials[role].email);
-    setPassword(defaultCredentials[role].password);
-  };
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const notice = errorMsg ?? (!getSupabaseConfig()
+    ? supabaseConfigMessage
+    : authError && Object.hasOwn(authMessages, authError) ? authMessages[authError] : '');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -36,32 +45,16 @@ export default function LoginPage() {
     setSuccessMsg('');
     setErrorMsg('');
 
-    const supabase = getSupabaseBrowserClient();
-    if (!supabase) {
-      setErrorMsg('Supabase is not configured. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.');
-      setIsLoading(false);
-      return;
-    }
-
     try {
+      const supabase = getSupabaseBrowserClient();
+      if (!supabase) throw new Error(supabaseConfigMessage);
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error || !data.user) {
-        setErrorMsg(error?.message || 'Unable to sign in. Please check your credentials.');
-        setIsLoading(false);
-        return;
-      }
+      if (error || !data.session) throw new Error(error?.message || 'Unable to sign in. Please check your credentials.');
 
-      const role = normalizeRole(data.user.app_metadata?.role ?? data.user.user_metadata?.role ?? 'student');
-      setStoredSession({
-        role,
-        email: data.user.email || email,
-        full_name: data.user.user_metadata?.full_name ?? null,
-        id: data.user.id,
-      });
-
+      const role = await getVerifiedRole(data.session.access_token);
       setSuccessMsg(`Signed in as ${role}. Redirecting...`);
-      const targetRoute = role === 'teacher' ? '/teacher' : role === 'admin' ? '/admin' : '/dashboard';
-      setTimeout(() => router.push(targetRoute), 350);
+      router.replace(portalDestination(role, search.get('redirectTo')));
+      router.refresh();
     } catch (error) {
       setErrorMsg(error instanceof Error ? error.message : 'Unexpected authentication error.');
     } finally {
@@ -86,14 +79,15 @@ export default function LoginPage() {
 
             <div className="mt-6">
               <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-                Quick account template
+                Account examples
               </label>
               <div className="mt-2 grid grid-cols-3 gap-2">
                 {(['student', 'teacher', 'admin'] as Role[]).map((role) => (
                   <button
                     key={role}
                     type="button"
-                    onClick={() => handleQuickLogin(role)}
+                    onClick={() => setSelectedRole(role)}
+                    aria-pressed={selectedRole === role}
                     className={`flex flex-col items-center justify-center rounded-xl p-2.5 text-xs transition-all border ${
                       selectedRole === role
                         ? role === 'student'
@@ -109,6 +103,7 @@ export default function LoginPage() {
                   </button>
                 ))}
               </div>
+              <p className="mt-2 text-xs text-slate-400">Example addresses are for reference. Sign in with your own account.</p>
             </div>
 
             <form onSubmit={handleSubmit} className="mt-6 space-y-4">
@@ -116,6 +111,8 @@ export default function LoginPage() {
                 <label className="text-xs font-medium text-slate-300">Email Address</label>
                 <input
                   type="email"
+                  placeholder={`${selectedRole}@example.com`}
+                  autoComplete="username"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
@@ -127,6 +124,7 @@ export default function LoginPage() {
                 <label className="text-xs font-medium text-slate-300">Password</label>
                 <input
                   type="password"
+                  autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
@@ -134,9 +132,9 @@ export default function LoginPage() {
                 />
               </div>
 
-              {errorMsg && (
+              {notice && (
                 <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-2.5 text-xs text-rose-300">
-                  {errorMsg}
+                  {notice}
                 </div>
               )}
 
@@ -159,7 +157,7 @@ export default function LoginPage() {
                   </span>
                 ) : (
                   <>
-                    <span>Enter {selectedRole.toUpperCase()} Portal</span>
+                    <span>Sign In</span>
                     <ArrowRight className="h-4 w-4" />
                   </>
                 )}

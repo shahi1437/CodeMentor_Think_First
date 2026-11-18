@@ -181,7 +181,7 @@ export default function DiagnosticAssessmentPage() {
                   <ArrowRight className="h-4 w-4" />
                 </Link>
                 <Link
-                  href="/workspace/debugging/p-3"
+                  href="/problems?mode=debugging"
                   className="flex items-center gap-2 rounded-xl bg-amber-600 px-5 py-2.5 text-xs font-bold text-white hover:bg-amber-500 transition-colors"
                 >
                   <span>Start Recommended Bug Lab</span>

@@ -11,18 +11,17 @@ CodeMentor AI is a learning platform for coding practice, debugging skill develo
 
 ## Local setup
 
-1. Copy `.env.example` to `backend/.env` for server-only settings.
-2. Copy the frontend values (`NEXT_PUBLIC_BACKEND_URL`, `NEXT_PUBLIC_SUPABASE_URL`, and `NEXT_PUBLIC_SUPABASE_ANON_KEY`) into `frontend/.env.local`.
-3. Fill in your private backend values locally. Never put service-role, JWT, Judge0, or LLM credentials in the frontend environment.
-4. Start the backend:
-   - `cd backend`
-   - `python -m venv venv`
-   - `venv\Scripts\python.exe -m pip install -r requirements.txt`
-   - `venv\Scripts\python.exe -m uvicorn backend.app.main:app --reload`
-5. Start the frontend:
+1. Copy the backend settings from `.env.example` into `backend/.env`. FastAPI reads the working directory's `.env` as a fallback and prefers the backend file when both define a setting. Process environment variables take precedence.
+2. Copy the frontend settings into `frontend/.env.local`. Set `NEXT_PUBLIC_BACKEND_URL` to `http://127.0.0.1:8000`. If `NEXT_PUBLIC_API_URL` is also set, it takes precedence.
+3. Fill in the Supabase project URL and API keys. Keep service-role, JWT, Judge0, and LLM credentials in the backend environment.
+4. Start FastAPI from the repository root.
+   - `python -m venv backend/venv`
+   - `backend\venv\Scripts\python.exe -m pip install -r backend/requirements.txt`
+   - `backend\venv\Scripts\python.exe -m uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8000`
+5. Start Next.js in a second terminal.
    - `cd frontend`
    - `npm install`
-   - `npm run dev`
+   - `npm run dev -- --port 3000`
 
 ## Connect an existing Supabase project
 
@@ -56,12 +55,19 @@ The new `20261121000100_scope_course_data_rls.sql` migration is not applied;
 do not push it to production until isolated RLS tests pass and explicit
 production approval is obtained.
 
-For local configuration, copy the backend values from `.env.example` to
-`backend/.env`, and only the frontend values (`NEXT_PUBLIC_BACKEND_URL`,
-`NEXT_PUBLIC_SUPABASE_URL`, and `NEXT_PUBLIC_SUPABASE_ANON_KEY`) to
-`frontend/.env.local`. Obtain the URL, anon key, service-role key, and JWT
-verification secret from the existing project's Dashboard -> Project Settings ->
-API. The service-role key and JWT secret must remain backend-only.
+Use the same Supabase project URL for `NEXT_PUBLIC_SUPABASE_URL` and `SUPABASE_URL`.
+In the project's Dashboard under **Settings → API Keys**, copy the publishable
+key into `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` or use the legacy anon key in
+`NEXT_PUBLIC_SUPABASE_ANON_KEY`. Set `SUPABASE_SERVICE_ROLE_KEY` in `backend/.env`
+for persisted profiles and catalog reads. FastAPI verifies ES256 and RS256
+sessions against the project's public JWKS. Set `SUPABASE_JWT_SECRET` only if
+the project still issues legacy HS256 sessions.
+
+If email confirmation is enabled, the project's Auth redirect URL allowlist
+must include `http://localhost:3000/auth/callback` for local registration at
+`localhost`. Add `http://127.0.0.1:3000/auth/callback` if you use that origin.
+Open the confirmation email in the same browser and use the same origin as the
+registration page. Restart Next.js and FastAPI after editing their environment files.
 
 Sign up a user in the app. Provision the first administrator through a trusted,
 out-of-band database procedure; after that, role changes must use the backend's
@@ -81,6 +87,11 @@ Code execution is sent from FastAPI to Judge0; the browser never receives the Ju
 - `JUDGE0_AUTH_TOKEN`: the private Judge0 token when the instance requires authentication.
 
 The backend sends bounded CPU, wall-clock, memory, and output limits with each run. Python, JavaScript, and C++ are enabled in the current execution registry. A missing URL returns an explicit configuration error; it does not report simulated execution results. No live Judge0 connection has been verified in this environment.
+
+For a local Judge0 instance, use its running loopback API URL. Check its `/about`
+endpoint before testing Run. When Judge0 is configured, Run also requires the
+Supabase execution quota function from `20261121000300_execution_quota.sql`.
+Use a verified test database for migration and grading tests.
 
 ## Problem catalog and workspaces
 
@@ -108,7 +119,7 @@ In the backend `.env`, configure:
 - `LLM_API_KEY`: a private provider key. Keep it only in the backend environment.
 - `LLM_MODEL`: a model name supported by that provider.
 
-When following the local setup commands (which start FastAPI from `backend/`), put
+When following the local setup commands, put
 these values in `backend/.env`; the root `.env.example` is a template you can copy
 from. Do not put `LLM_API_KEY` in `frontend/.env.local` or in any `NEXT_PUBLIC_*`
 variable.
@@ -154,7 +165,7 @@ venv\Scripts\python.exe -m pytest tests -q
 
 External services are not represented as successful when configuration is missing. In particular, the AI Mentor requires backend LLM configuration and a successful provider response; configure real credentials to verify the live integration.
 
-For frontend production validation, run `cd frontend` and `npm run build`. For the complete backend suite from the repository root, run `backend\\venv\\Scripts\\python.exe -m pytest backend\\tests -q`.
+For frontend validation, run `cd frontend`, `npm test`, `npm run lint`, and `npm run build`. For the complete backend suite from the repository root, run `backend\\venv\\Scripts\\python.exe -m pytest backend\\tests -q`.
 
 GitHub Actions runs the backend suite, frontend lint/type/build checks, and
 verifies that Supabase migration versions are unique. It does not deploy

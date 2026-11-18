@@ -4,9 +4,10 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "next build --webpack",
     "start": "next start",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "test": "node --experimental-strip-types --test tests/runtime-config.test.mjs tests/analyzer.test.mjs"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",

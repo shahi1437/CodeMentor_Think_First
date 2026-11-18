@@ -4,12 +4,12 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { AlertCircle, ChevronLeft, RefreshCw, Search } from 'lucide-react';
 import { AppShell } from '@/components/layout/AppShell';
-import { getSupabaseBrowserClient } from '@/lib/supabase/client';
+import { backendRequest } from '@/lib/backend';
 
 interface ProblemRecord {
   id: string;
   title: string;
-  slug: string;
+  archived_at?: string | null;
   difficulty: string;
   category: string;
   problem_mode: 'normal' | 'debugging' | 'both';
@@ -18,16 +18,11 @@ interface ProblemRecord {
   is_published: boolean;
 }
 
-const backendUrl = process.env.NEXT_PUBLIC_API_URL
-  || process.env.NEXT_PUBLIC_BACKEND_URL
-  || '';
-
 function isProblem(value: unknown): value is ProblemRecord {
   if (typeof value !== 'object' || value === null) return false;
   const record = value as Record<string, unknown>;
   return typeof record.id === 'string'
     && typeof record.title === 'string'
-    && typeof record.slug === 'string'
     && typeof record.difficulty === 'string'
     && typeof record.category === 'string'
     && ['normal', 'debugging', 'both'].includes(String(record.problem_mode))
@@ -46,29 +41,7 @@ export default function AdminProblemBankPage() {
 
   const loadProblems = useCallback(async () => {
     try {
-      if (!backendUrl) {
-        throw new Error('Set NEXT_PUBLIC_BACKEND_URL to connect to the backend.');
-      }
-      const supabase = getSupabaseBrowserClient();
-      if (!supabase) {
-        throw new Error('Supabase authentication is not configured in this browser.');
-      }
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      if (sessionError || !session?.access_token) {
-        throw new Error('Sign in with an administrator account to view the problem bank.');
-      }
-
-      const response = await fetch(`${backendUrl}/api/v1/platform/problems`, {
-        headers: { Authorization: `Bearer ${session.access_token}` },
-        cache: 'no-store',
-      });
-      const body: unknown = await response.json().catch(() => null);
-      if (!response.ok) {
-        const detail = typeof body === 'object' && body !== null
-          ? (body as Record<string, unknown>).detail
-          : null;
-        throw new Error(typeof detail === 'string' ? detail : `Problem request failed (${response.status}).`);
-      }
+      const body = await backendRequest<unknown>('/admin/problems');
       if (!Array.isArray(body) || !body.every(isProblem)) {
         throw new Error('The backend returned invalid problem data.');
       }
@@ -122,7 +95,7 @@ export default function AdminProblemBankPage() {
           </div>
           <div className="flex items-center gap-2">
             <Link href="/admin/problems/new" className="rounded-lg border border-slate-700 bg-navy-900 px-3 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-800 hover:text-white">
-              Authoring status
+              New problem
             </Link>
             <button
               type="button"
@@ -198,13 +171,13 @@ export default function AdminProblemBankPage() {
                 <tbody className="divide-y divide-slate-800/60">
                   {filtered.map((problem) => (
                     <tr key={problem.id}>
-                      <td className="px-4 py-3 font-semibold text-white">{problem.title}</td>
+                      <td className="px-4 py-3 font-semibold text-white"><Link className="hover:text-indigo-300 hover:underline" href={'/admin/problems/' + problem.id}>{problem.title}</Link></td>
                       <td className="px-4 py-3 capitalize">{problem.problem_mode}</td>
                       <td className="px-4 py-3 text-slate-400">{problem.category}</td>
                       <td className="px-4 py-3 capitalize">{problem.difficulty}</td>
                       <td className="px-4 py-3">
                         <span className={problem.is_published ? 'text-teal-300' : 'text-amber-300'}>
-                          {problem.is_published ? 'Published' : 'Draft'}
+                          {problem.archived_at ? 'Archived' : problem.is_published ? 'Published' : 'Draft'}
                         </span>
                       </td>
                     </tr>

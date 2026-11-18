@@ -171,7 +171,7 @@ export default function LandingPage() {
                   </ul>
                   <div className="mt-6">
                     <Link
-                      href="/workspace/coding/p-1"
+                      href="/problems?mode=normal"
                       className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-500 transition-colors"
                     >
                       <Play className="h-3.5 w-3.5 fill-white" />
@@ -225,7 +225,7 @@ export default function LandingPage() {
                   </ul>
                   <div className="mt-6">
                     <Link
-                      href="/workspace/debugging/p-3"
+                      href="/problems?mode=debugging"
                       className="inline-flex items-center gap-2 rounded-lg bg-amber-600 px-4 py-2 text-xs font-semibold text-white hover:bg-amber-500 transition-colors"
                     >
                       <Bug className="h-3.5 w-3.5" />

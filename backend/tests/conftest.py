@@ -20,6 +20,9 @@ class FakeRoleRepository:
 
 @pytest.fixture(autouse=True)
 def isolate_auth_configuration(monkeypatch):
+    monkeypatch.setattr(settings, "SUPABASE_URL", "https://fixture.supabase.co")
+    monkeypatch.setattr(settings, "SUPABASE_SERVICE_ROLE_KEY", "")
+    monkeypatch.setattr(settings, "JUDGE0_API_URL", "")
     monkeypatch.setattr(settings, "SUPABASE_JWT_SECRET", "test-only-jwt-signing-key-for-codementor")
     repository = FakeRoleRepository()
     monkeypatch.setattr(role_store, "_role_repository", repository)

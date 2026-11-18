@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import { AppShell } from '@/components/layout/AppShell';
 import { CodeEditor } from '@/components/ui/CodeEditor';
-import { getSupabaseBrowserClient } from '@/lib/supabase/client';
+import { backendRequest, type PlatformRunResult } from '@/lib/backend';
 
 type Language = 'python' | 'javascript' | 'cpp';
 interface ProblemRecord {
@@ -28,7 +28,7 @@ interface ProblemRecord {
   description: string;
   problem_mode: 'normal' | 'debugging' | 'both';
   supported_languages: string[];
-  starter_code: Partial<Record<Language, string>>;
+  debugging_starter_code?: Partial<Record<Language, string>>;
 }
 interface SampleCase {
   id: string;
@@ -37,17 +37,7 @@ interface SampleCase {
   expected_output: string;
 }
 
-const backendUrl =
-  process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_BACKEND_URL || '';
 const languages: Language[] = ['python', 'javascript', 'cpp'];
-
-async function getAccessToken() {
-  const supabase = getSupabaseBrowserClient();
-  if (!supabase) throw new Error('Supabase authentication is not configured in this environment.');
-  const { data: { session }, error } = await supabase.auth.getSession();
-  if (error || !session?.access_token) throw new Error('A valid user session is required for debugging.');
-  return session.access_token;
-}
 
 export default function DebuggingLabWorkspace() {
   const params = useParams();
@@ -81,24 +71,18 @@ export default function DebuggingLabWorkspace() {
       setIsLoading(true);
       setLoadError(null);
       try {
-        if (!backendUrl) throw new Error('Set NEXT_PUBLIC_API_URL or NEXT_PUBLIC_BACKEND_URL to connect to the backend.');
-        const accessToken = await getAccessToken();
-        const headers = { Authorization: `Bearer ${accessToken}` };
-        const encodedId = encodeURIComponent(problemId);
-        const [problemResponse, samplesResponse] = await Promise.all([
-          fetch(`${backendUrl}/api/v1/platform/problems/${encodedId}`, { headers }),
-          fetch(`${backendUrl}/api/v1/platform/problems/${encodedId}/samples`, { headers }),
-        ]);
-        const problemBody = await problemResponse.json().catch(() => null);
-        const samplesBody = await samplesResponse.json().catch(() => null);
-        if (!problemResponse.ok) throw new Error(problemBody?.detail || 'Unable to load this challenge.');
-        if (!samplesResponse.ok) throw new Error(samplesBody?.detail || 'Unable to load public regression cases.');
-        if (!problemBody || !Array.isArray(samplesBody)) throw new Error('The server returned invalid challenge data.');
-        if (problemBody.problem_mode === 'normal') throw new Error('This problem is not a debugging challenge.');
+        const problemPath = `/platform/problems/${encodeURIComponent(problemId)}`;
+        const record = await backendRequest<ProblemRecord>(problemPath);
+        if (!record?.id) throw new Error('The server returned invalid challenge data.');
+        if (record.problem_mode === 'normal') throw new Error('This problem is not a debugging challenge.');
+        if (!Object.values(record.debugging_starter_code || {}).some(value => typeof value === 'string' && value.trim())) {
+          throw new Error('This debugging challenge is awaiting verification.');
+        }
+        const samples = await backendRequest<SampleCase[]>(problemPath + '/samples');
+        if (!Array.isArray(samples)) throw new Error('The server returned invalid sample data.');
         if (active) {
-          const record = problemBody as ProblemRecord;
           setProblem(record);
-          setSampleCases(samplesBody as SampleCase[]);
+          setSampleCases(samples);
           const initialLanguage = (record.supported_languages || []).find((item) =>
             languages.includes(item as Language),
           ) as Language | undefined;
@@ -106,7 +90,7 @@ export default function DebuggingLabWorkspace() {
             setLoadError('This challenge does not have a supported execution language configured.');
           } else {
             setLanguage(initialLanguage);
-            setCode(record.starter_code?.[initialLanguage] || '');
+            setCode(record.debugging_starter_code?.[initialLanguage] || '');
           }
         }
       } catch (error) {
@@ -120,19 +104,10 @@ export default function DebuggingLabWorkspace() {
   }, [problemId]);
 
   const fetchPlatformResult = async (endpoint: 'execute' | 'submit', payload: Record<string, unknown>) => {
-    if (!backendUrl) throw new Error('Set NEXT_PUBLIC_API_URL or NEXT_PUBLIC_BACKEND_URL to connect to the backend.');
-    const accessToken = await getAccessToken();
-    const response = await fetch(`${backendUrl}/api/v1/platform/${endpoint}`, {
+    return backendRequest<PlatformRunResult>(`/platform/${endpoint}`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${accessToken}`,
-      },
       body: JSON.stringify(payload),
     });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(body?.detail || `Request failed with status ${response.status}.`);
-    return body;
   };
 
   const requestHint = async () => {
@@ -140,17 +115,13 @@ export default function DebuggingLabWorkspace() {
     setHintLoading(true);
     setHintError(null);
     try {
-      const accessToken = await getAccessToken();
-      if (!backendUrl) throw new Error('Set NEXT_PUBLIC_API_URL or NEXT_PUBLIC_BACKEND_URL to connect to the backend.');
       const nextTier = hints.length + 1;
-      const response = await fetch(
-        `${backendUrl}/api/v1/platform/problems/${encodeURIComponent(problemId)}/hints/${nextTier}`,
-        { headers: { Authorization: `Bearer ${accessToken}` } },
+      const body = await backendRequest<{ hint?: string }>(
+        `/platform/problems/${encodeURIComponent(problemId)}/hints/${nextTier}`,
       );
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(body?.detail || 'Unable to load the next hint.');
-      if (typeof body.hint !== 'string') throw new Error('The server returned an invalid hint.');
-      setHints((current) => [...current, body.hint]);
+      const hint = body?.hint;
+      if (typeof hint !== 'string') throw new Error('The server returned an invalid hint.');
+      setHints((current) => [...current, hint]);
     } catch (error) {
       setHintError(error instanceof Error ? error.message : 'Unable to load the next hint.');
     } finally {
