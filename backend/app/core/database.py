@@ -21,6 +21,9 @@ PUBLIC_PROBLEM_COLUMNS = (
     "is_published",
     "created_at",
     "updated_at",
+    "archived_at",
+    "revision",
+    "verified_revision",
 )
 PUBLIC_PROBLEM_FIELDS = frozenset(PUBLIC_PROBLEM_COLUMNS)
 
@@ -99,7 +102,7 @@ class DatabaseService:
         client = self._require_client()
         response = (
             client.table("problems")
-            .select(",".join(PUBLIC_PROBLEM_COLUMNS))
+            .select(",".join((*PUBLIC_PROBLEM_COLUMNS, "debugging_starter_code")))
             .eq("id", problem_id)
             .maybe_single()
             .execute()
@@ -115,6 +118,28 @@ class DatabaseService:
         response = query.order("created_at", desc=True).limit(limit).execute()
         data = self._extract_data(response, [])
         return list(data) if isinstance(data, list) else []
+
+    def get_admin_problem(self, problem_id: str) -> Optional[Dict[str, Any]]:
+        response = (
+            self._require_client().table("problems")
+            .select(",".join((*PUBLIC_PROBLEM_COLUMNS, "progressive_hints", "reference_solutions",
+                              "debugging_starter_code", "test_cases:problem_test_cases(name,input_text,expected_output,is_hidden)")))
+            .eq("id", problem_id).maybe_single().execute()
+        )
+        return self._extract_data(response)
+
+    def save_problem_draft(self, problem_id, revision, author_id, draft):
+        result = self._require_client().rpc("save_problem_draft", {
+            "p_problem_id": problem_id, "p_revision": revision,
+            "p_author_id": author_id, "p_draft": draft,
+        }).execute()
+        return self._extract_data(result)
+
+    def change_problem_state(self, problem_id: str, revision: int, state: str) -> bool:
+        result = self._require_client().rpc("change_problem_state", {
+            "p_problem_id": problem_id, "p_revision": revision, "p_state": state,
+        }).execute()
+        return self._extract_data(result) is True
 
     def list_problem_test_cases(self, problem_id: str, limit: int = 101) -> List[Dict[str, Any]]:
         client = self._require_client()

@@ -12,6 +12,7 @@ from backend.app.core.ai_mentor import (
 from backend.app.core.database import PUBLIC_PROBLEM_FIELDS, get_database_service
 from backend.app.core.config import settings
 from backend.app.core.execution_quota import enforce_execution_quota
+from backend.app.core.grading import MAX_GRADING_TEST_CASES, grade_cases
 from backend.app.core.judge0 import execute_code
 from backend.app.core.learning_dna import summarize_learning_dna
 from backend.app.core.ml_classifier import ErrorClassifier
@@ -32,7 +33,6 @@ from backend.app.schemas.platform import (
 )
 
 router = APIRouter(prefix="/platform", tags=["Platform services"])
-MAX_GRADING_TEST_CASES = 100
 STUDENT_SUBMISSION_FIELDS = frozenset({
     "id",
     "user_id",
@@ -120,7 +120,7 @@ async def list_problem_records(current_user: UserProfile = Depends(require_stude
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     return [
         {key: value for key, value in problem.items() if key in PUBLIC_PROBLEM_FIELDS}
-        for problem in problems
+        for problem in problems if not problem.get("archived_at")
     ]
 
 
@@ -131,11 +131,17 @@ async def get_problem_record(problem_id: str, current_user: UserProfile = Depend
         problem = database.get_problem(problem_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
-    if not problem:
+    if not problem or problem.get("archived_at"):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Problem not found.")
     if problem.get("is_published") is False and current_user.role == UserRole.STUDENT:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Hidden problems are not available to students.")
-    return {key: value for key, value in problem.items() if key in PUBLIC_PROBLEM_FIELDS}
+    record = {key: value for key, value in problem.items() if key in PUBLIC_PROBLEM_FIELDS}
+    if (
+        problem.get("is_published") and problem.get("problem_mode") in {"debugging", "both"}
+        and problem.get("verified_revision") and problem["verified_revision"] == problem.get("revision")
+    ):
+        record["debugging_starter_code"] = problem.get("debugging_starter_code", {})
+    return record
 
 
 @router.get("/problems/{problem_id}/samples")
@@ -322,46 +328,23 @@ async def submit_code(payload: SubmissionRequest, current_user: UserProfile = De
         )
         for test_case in stored_cases
     ]
-    results = []
-    passed_cases = 0
-    total_cases = len(grading_cases)
-
-    for test_case in grading_cases:
-        execution = await execute_code(payload.language, payload.source_code, test_case.input)
-        actual_output = (execution.get("stdout") or "").strip()
-        expected_output = str(test_case.expected_output or "").strip()
-        is_accepted = execution.get("status") == "accepted" and actual_output == expected_output
-        if is_accepted:
-            passed_cases += 1
-        results.append({"status": execution.get("status", "error")})
-
-    verdict = "accepted" if total_cases and passed_cases == total_cases else "wrong_answer"
-    if not total_cases:
-        verdict = "invalid_submission"
-    execution_error = next(
-        (
-            result["status"]
-            for result in results
-            if result["status"] in {
-                "compilation_error",
-                "runtime_error",
-                "time_limit_exceeded",
-                "memory_limit_exceeded",
-                "validation_error",
-                "unconfigured",
-                "error",
-            }
-        ),
-        None,
-    )
-    if execution_error:
-        verdict = "configuration_error" if execution_error == "unconfigured" else execution_error
+    if problem and problem.get("revision") is not None:
+        try:
+            latest = database.get_problem(payload.problem_id)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail="The problem could not be rechecked.") from exc
+        if not latest or latest.get("revision") != problem["revision"]:
+            raise HTTPException(status_code=409, detail="This problem changed. Reload before submitting.")
+    grade = await grade_cases(execute_code, payload.language, payload.source_code, grading_cases)
+    verdict = grade.verdict
+    passed_cases = grade.passed
+    total_cases = grade.total
 
     submission_record = {
         "user_id": current_user.id,
         "problem_id": payload.problem_id,
         "status": _submission_database_status(verdict),
-        "score": round((passed_cases / total_cases) * 100, 2) if total_cases else 0.0,
+        "score": grade.score,
         "language": payload.language,
         "source_code": payload.source_code,
         "stdout": "",
@@ -370,7 +353,7 @@ async def submit_code(payload: SubmissionRequest, current_user: UserProfile = De
             "verdict": verdict,
             "passed_test_count": passed_cases,
             "total_test_count": total_cases,
-            "results": results,
+            "results": grade.statuses,
         },
     }
 

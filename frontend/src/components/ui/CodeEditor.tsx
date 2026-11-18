@@ -94,6 +94,7 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
             </span>
           )}
           <button
+            type="button"
             onClick={handleCopy}
             className="flex items-center gap-1 rounded-md px-2 py-1 text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
             title="Copy code to clipboard"
@@ -103,6 +104,7 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
           </button>
           {!readOnly && (
             <button
+              type="button"
               onClick={handleReset}
               className="flex items-center gap-1 rounded-md px-2 py-1 text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
               title="Reset code to original starter"

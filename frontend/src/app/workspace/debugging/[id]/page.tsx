@@ -28,7 +28,7 @@ interface ProblemRecord {
   description: string;
   problem_mode: 'normal' | 'debugging' | 'both';
   supported_languages: string[];
-  starter_code: Partial<Record<Language, string>>;
+  debugging_starter_code?: Partial<Record<Language, string>>;
 }
 interface SampleCase {
   id: string;
@@ -95,6 +95,9 @@ export default function DebuggingLabWorkspace() {
         if (!samplesResponse.ok) throw new Error(samplesBody?.detail || 'Unable to load public regression cases.');
         if (!problemBody || !Array.isArray(samplesBody)) throw new Error('The server returned invalid challenge data.');
         if (problemBody.problem_mode === 'normal') throw new Error('This problem is not a debugging challenge.');
+        if (!Object.values(problemBody.debugging_starter_code || {}).some(value => typeof value === 'string' && value.trim())) {
+          throw new Error('This debugging challenge is awaiting verification.');
+        }
         if (active) {
           const record = problemBody as ProblemRecord;
           setProblem(record);
@@ -106,7 +109,7 @@ export default function DebuggingLabWorkspace() {
             setLoadError('This challenge does not have a supported execution language configured.');
           } else {
             setLanguage(initialLanguage);
-            setCode(record.starter_code?.[initialLanguage] || '');
+            setCode(record.debugging_starter_code?.[initialLanguage] || '');
           }
         }
       } catch (error) {
