@@ -1,40 +1,74 @@
+from functools import lru_cache
 from typing import List, Optional
 import jwt
 from fastapi import Depends, HTTPException, status
+from fastapi.concurrency import run_in_threadpool
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from backend.app.core.config import settings
+from backend.app.core.config import SupabaseConfigurationError, settings
 from backend.app.core.role_store import InactiveAccountError, get_user_role
 from backend.app.schemas.auth import TokenPayload, UserProfile, UserRole
 
 # Bearer token extractor
 security = HTTPBearer(auto_error=False)
+ASYMMETRIC_ALGORITHMS = {"ES256", "RS256"}
+
+
+@lru_cache(maxsize=8)
+def _jwks_client(issuer: str) -> jwt.PyJWKClient:
+    return jwt.PyJWKClient(
+        f"{issuer}/.well-known/jwks.json",
+        lifespan=300,
+        timeout=5,
+    )
 
 
 def decode_jwt_token(token: str) -> TokenPayload:
-    """
-    Decodes and verifies a Supabase JWT token.
-    Supabase signs tokens with HS256 using the project's JWT Secret.
-    """
-    jwt_secret = settings.SUPABASE_JWT_SECRET
-    if (
-        not jwt_secret
-        or len(jwt_secret.encode("utf-8")) < 32
-        or jwt_secret.strip().lower().startswith(("replace_with", "your_"))
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Authentication is not configured with a valid Supabase JWT secret.",
-        )
-
+    """Verify a Supabase access token and resolve its persisted application role."""
+    project_url = settings.SUPABASE_URL.strip().rstrip("/")
     try:
-        # Decode using the project's JWT secret
+        header = jwt.get_unverified_header(token)
+        algorithm = header.get("alg")
+        if not isinstance(algorithm, str) or (algorithm != "HS256" and algorithm not in ASYMMETRIC_ALGORITHMS):
+            raise jwt.InvalidAlgorithmError("Unsupported signing algorithm")
+        if not project_url:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Supabase token verification requires SUPABASE_URL in backend/.env.",
+            )
+        issuer = f"{project_url}/auth/v1"
+        if algorithm == "HS256":
+            signing_key = settings.SUPABASE_JWT_SECRET
+            if (
+                len(signing_key.encode("utf-8")) < 32
+                or signing_key.strip().lower().startswith(("replace_with", "your_"))
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Legacy Supabase authentication requires a valid JWT secret.",
+                )
+        else:
+            key_id = header.get("kid")
+            if not isinstance(key_id, str) or not key_id:
+                raise jwt.InvalidTokenError("Missing signing key identifier")
+            public_key = _jwks_client(issuer).get_signing_key(key_id)
+            if public_key.algorithm_name != algorithm:
+                raise jwt.InvalidAlgorithmError("Signing key does not match algorithm")
+            signing_key = public_key.key
+
         payload = jwt.decode(
             token,
-            jwt_secret,
-            algorithms=["HS256"],
-            options={"verify_aud": False},  # Supabase aud is typically 'authenticated'
+            signing_key,
+            algorithms=[algorithm],
+            issuer=issuer,
+            audience="authenticated",
+            options={"require": ["sub", "exp", "iss", "aud"]},
         )
+    except (jwt.PyJWKClientConnectionError, jwt.PyJWKSetError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Supabase signing keys are temporarily unavailable.",
+        ) from exc
     except jwt.ExpiredSignatureError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -64,6 +98,8 @@ def decode_jwt_token(token: str) -> TokenPayload:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="This account is inactive.",
         ) from exc
+    except SupabaseConfigurationError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -106,7 +142,7 @@ async def get_current_user(
         )
 
     token = credentials.credentials
-    payload = decode_jwt_token(token)
+    payload = await run_in_threadpool(decode_jwt_token, token)
 
     # Return validated profile
     return UserProfile(

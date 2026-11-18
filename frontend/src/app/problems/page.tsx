@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import {
   Search,
   Code2,
@@ -11,7 +12,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { AppShell } from '@/components/layout/AppShell';
-import { getSupabaseBrowserClient } from '@/lib/supabase/client';
+import { BackendRequestError, backendRequest } from '@/lib/backend';
 
 interface ProblemRecord {
   id: string;
@@ -25,44 +26,40 @@ interface ProblemRecord {
   description: string;
 }
 
-const backendUrl =
-  process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_BACKEND_URL || '';
-
 export default function ProblemHubPage() {
+  return (
+    <Suspense fallback={<AppShell><p role="status" className="p-8 text-center">Loading problem catalog…</p></AppShell>}>
+      <ProblemHub />
+    </Suspense>
+  );
+}
+
+function ProblemHub() {
+  const mode = useSearchParams().get('mode');
+  const initialMode = mode === 'normal' || mode === 'debugging' ? mode : 'all';
+  return <ProblemCatalog key={initialMode} initialMode={initialMode} />;
+}
+
+function ProblemCatalog({ initialMode }: { initialMode: string }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedDifficulty, setSelectedDifficulty] = useState<string>('all');
-  const [selectedMode, setSelectedMode] = useState<string>('all');
+  const [selectedMode, setSelectedMode] = useState(initialMode);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [selectedLanguage, setSelectedLanguage] = useState<string>('all');
   const [problems, setProblems] = useState<ProblemRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<{ message: string; signIn: boolean } | null>(null);
 
   const loadProblems = useCallback(async () => {
     try {
-      const supabase = getSupabaseBrowserClient();
-      if (!supabase) {
-        throw new Error('Supabase authentication is not configured in this environment.');
-      }
-      if (!backendUrl) {
-        throw new Error('Set NEXT_PUBLIC_API_URL or NEXT_PUBLIC_BACKEND_URL to connect to the backend.');
-      }
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      if (sessionError) throw sessionError;
-      if (!session) throw new Error('Please sign in to browse published problems.');
-
-      const response = await fetch(`${backendUrl}/api/v1/platform/problems`, {
-        headers: { Authorization: `Bearer ${session.access_token}` },
-      });
-      if (!response.ok) {
-        const body = await response.json().catch(() => null);
-        throw new Error(body?.detail || 'Unable to load problems from the server.');
-      }
-      const data: unknown = await response.json();
+      const data = await backendRequest<unknown>('/platform/problems');
       if (!Array.isArray(data)) throw new Error('The server returned an invalid problem catalog.');
       setProblems(data as ProblemRecord[]);
     } catch (error) {
-      setLoadError(error instanceof Error ? error.message : 'Unable to load problems.');
+      setLoadError({
+        message: error instanceof Error ? error.message : 'Unable to load problems.',
+        signIn: error instanceof BackendRequestError && error.status === 401,
+      });
     } finally {
       setIsLoading(false);
     }
@@ -125,9 +122,11 @@ export default function ProblemHubPage() {
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">Problem Hub</h1>
-              <span className="rounded-full bg-indigo-500/10 px-2.5 py-0.5 text-xs font-semibold text-indigo-400 border border-indigo-500/30">
-                {problems.length} Published Challenges
-              </span>
+              {!isLoading && !loadError && (
+                <span className="rounded-full bg-indigo-500/10 px-2.5 py-0.5 text-xs font-semibold text-indigo-400 border border-indigo-500/30">
+                  {problems.length} Published Challenges
+                </span>
+              )}
             </div>
             <p className="mt-1 text-xs text-slate-400">
               Practice building algorithms from scratch or diagnosing tricky seeded bugs in real code.
@@ -239,20 +238,23 @@ export default function ProblemHubPage() {
             <div className="rounded-2xl border border-rose-500/30 bg-rose-950/20 p-8 text-center" role="alert">
               <AlertCircle className="mx-auto h-9 w-9 text-rose-400 mb-3" />
               <h3 className="text-base font-bold text-white">Problem catalog unavailable</h3>
-              <p className="mt-2 text-sm text-slate-300">{loadError}</p>
-              <button
-                onClick={refreshProblems}
-                className="mt-4 rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-500"
-              >
-                Try again
-              </button>
+              <p className="mt-2 text-sm text-slate-300">{loadError.message}</p>
+              {loadError.signIn ? (
+                <Link href={{ pathname: '/auth/login', query: { redirectTo: '/problems' } }} className="mt-4 inline-block rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-500">
+                  Sign in
+                </Link>
+              ) : (
+                <button onClick={refreshProblems} className="mt-4 rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-500">
+                  Try again
+                </button>
+              )}
             </div>
           ) : problems.length === 0 ? (
             <div className="rounded-2xl border border-slate-800 bg-navy-900/40 p-12 text-center">
               <AlertCircle className="mx-auto h-10 w-10 text-slate-500 mb-3" />
               <h3 className="text-base font-bold text-white">No published problems yet</h3>
               <p className="mt-1 text-xs text-slate-400 max-w-sm mx-auto">
-                Published coding and debugging problems will appear here when the database is configured.
+                Coding and debugging problems will appear here once they are published.
               </p>
             </div>
           ) : filteredProblems.length === 0 ? (

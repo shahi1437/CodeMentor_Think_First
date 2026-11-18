@@ -24,17 +24,20 @@ class FakeRoleRepository:
         return resolved
 
 
-def create_test_token(sub: str, email: str, role: str, expires_in: int = 3600) -> str:
+def create_test_token(sub: str, email: str, role: str, expires_in: int = 3600, **claims) -> str:
     if role_store.get_user_role(sub) is None:
         role_store.set_user_role(sub, role)
     payload = {
         "sub": sub,
+        "iss": f"{settings.SUPABASE_URL}/auth/v1",
+        "aud": "authenticated",
         "email": email,
         "role": "authenticated",
         "app_metadata": {"role": role},
         "user_metadata": {"full_name": f"Test {role.title()}", "role": role},
         "exp": int(time.time()) + expires_in,
     }
+    payload.update(claims)
     return jwt.encode(payload, settings.SUPABASE_JWT_SECRET, algorithm="HS256")
 
 
@@ -61,6 +64,27 @@ def test_decode_expired_token():
         decode_jwt_token(expired_token)
     assert exc.value.status_code == 401
     assert "expired" in exc.value.detail.lower()
+
+
+@pytest.mark.parametrize("claims", [
+    {"iss": "https://different-project.supabase.co/auth/v1"},
+    {"aud": "anon"},
+    {"aud": None},
+])
+def test_legacy_token_requires_expected_issuer_and_audience(claims):
+    token = create_test_token("legacy-claims", "student@example.com", "student", **claims)
+    with pytest.raises(HTTPException) as exc:
+        decode_jwt_token(token)
+    assert exc.value.status_code == 401
+
+
+def test_legacy_token_does_not_bypass_validation_without_project_url(monkeypatch):
+    token = create_test_token("legacy-project", "student@example.com", "student")
+    monkeypatch.setattr(settings, "SUPABASE_URL", "")
+    with pytest.raises(HTTPException) as exc:
+        decode_jwt_token(token)
+    assert exc.value.status_code == 503
+    assert "SUPABASE_URL" in exc.value.detail
 
 
 @pytest.mark.asyncio
@@ -130,6 +154,8 @@ async def test_jwt_role_claim_cannot_promote_persisted_student(monkeypatch):
 def test_jwt_claim_cannot_authenticate_without_persisted_role():
     token_payload = {
         "sub": "unprovisioned-user",
+        "iss": f"{settings.SUPABASE_URL}/auth/v1",
+        "aud": "authenticated",
         "email": "user@test.com",
         "app_metadata": {"role": "admin"},
         "user_metadata": {"role": "admin"},
@@ -144,10 +170,12 @@ def test_jwt_claim_cannot_authenticate_without_persisted_role():
     assert "persisted profile role" in exc.value.detail
 
 
-def test_authentication_fails_closed_when_role_database_is_unavailable(monkeypatch):
+def test_authentication_fails_closed_when_role_database_is_unconfigured(monkeypatch):
     monkeypatch.setattr(role_store, "_role_repository", role_store.NullRoleRepository())
     token_payload = {
         "sub": "unavailable-role-user",
+        "iss": f"{settings.SUPABASE_URL}/auth/v1",
+        "aud": "authenticated",
         "email": "user@test.com",
         "app_metadata": {"role": "admin"},
         "exp": int(time.time()) + 3600,
@@ -158,14 +186,15 @@ def test_authentication_fails_closed_when_role_database_is_unavailable(monkeypat
         decode_jwt_token(token)
 
     assert exc.value.status_code == 503
-    assert "could not be verified against Supabase" in exc.value.detail
+    assert "SUPABASE_SERVICE_ROLE_KEY" in exc.value.detail
 
 
 def test_authentication_fails_when_jwt_secret_is_unconfigured(monkeypatch):
+    token = create_test_token("legacy-user", "user@test.com", "student")
     monkeypatch.setattr(settings, "SUPABASE_JWT_SECRET", "")
 
     with pytest.raises(HTTPException) as exc:
-        decode_jwt_token("not-a-token")
+        decode_jwt_token(token)
 
     assert exc.value.status_code == 503
     assert "JWT secret" in exc.value.detail

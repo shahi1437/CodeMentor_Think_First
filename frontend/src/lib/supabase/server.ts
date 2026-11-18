@@ -1,58 +1,19 @@
-import { cookies } from 'next/headers';
-import { NextResponse, type NextRequest } from 'next/server';
-import { createServerClient, type CookieOptions } from '@supabase/ssr';
-
-const getConfiguredSupabaseClient = () => {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '';
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '';
-
-  if (!supabaseUrl || !supabaseAnonKey) {
-    return null;
-  }
-
-  return { supabaseUrl, supabaseAnonKey };
-};
+﻿import { cookies } from 'next/headers';
+import { createServerClient } from '@supabase/ssr';
+import { getSupabaseConfig } from './config';
 
 export async function getSupabaseServerClient() {
-  const config = getConfiguredSupabaseClient();
+  const config = getSupabaseConfig();
   if (!config) return null;
 
   const cookieStore = await cookies();
-  const { supabaseUrl, supabaseAnonKey } = config;
-
-  return createServerClient(supabaseUrl, supabaseAnonKey, {
+  return createServerClient(config.url, config.key, {
     cookies: {
-      get(name: string) {
-        return cookieStore.get(name)?.value;
-      },
-      set(name: string, value: string, options: CookieOptions) {
-        cookieStore.set({ name, value, ...options });
-      },
-      remove(name: string, options: CookieOptions) {
-        cookieStore.set({ name, value: '', ...options });
-      },
-    },
-  });
-}
-
-export function getSupabaseMiddlewareClient(request: NextRequest, response: NextResponse) {
-  const config = getConfiguredSupabaseClient();
-  if (!config) return null;
-
-  const { supabaseUrl, supabaseAnonKey } = config;
-
-  return createServerClient(supabaseUrl, supabaseAnonKey, {
-    cookies: {
-      get(name: string) {
-        return request.cookies.get(name)?.value;
-      },
-      set(name: string, value: string, options: CookieOptions) {
-        request.cookies.set({ name, value });
-        response.cookies.set({ name, value, ...options });
-      },
-      remove(name: string, options: CookieOptions) {
-        request.cookies.set({ name, value: '' });
-        response.cookies.set({ name, value: '', ...options });
+      getAll: () => cookieStore.getAll(),
+      setAll(cookiesToSet) {
+        for (const { name, value, options } of cookiesToSet) {
+          cookieStore.set(name, value, options);
+        }
       },
     },
   });

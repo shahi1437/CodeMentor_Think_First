@@ -15,6 +15,8 @@ def create_test_token(sub: str, email: str, role: str, expires_in: int = 3600) -
         role_store.set_user_role(sub, role)
     payload = {
         "sub": sub,
+        "iss": f"{settings.SUPABASE_URL}/auth/v1",
+        "aud": "authenticated",
         "email": email,
         "role": "authenticated",  # Supabase aud / default
         "app_metadata": {"role": role},

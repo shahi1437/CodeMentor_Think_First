@@ -1,11 +1,12 @@
 import React from 'react';
-import { AlertCircle, Terminal, Cpu } from 'lucide-react';
+import { Cpu } from 'lucide-react';
 
 interface SimulationBannerProps {
   featureName?: string;
+  description?: string;
 }
 
-export const SimulationBanner: React.FC<SimulationBannerProps> = ({ featureName }) => {
+export const SimulationBanner: React.FC<SimulationBannerProps> = ({ featureName, description }) => {
   return (
     <div className="mb-4 rounded-lg border border-indigo-500/30 bg-indigo-950/40 px-4 py-2.5 text-xs text-indigo-200 backdrop-blur-md">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -15,8 +16,7 @@ export const SimulationBanner: React.FC<SimulationBannerProps> = ({ featureName 
           </span>
           <span>
             <strong className="text-white font-semibold">Demo Simulation Mode:</strong>{' '}
-            {featureName ? `${featureName} is currently running with realistic client simulation.` : 'Features are running with simulated client-side logic.'}
-            {' '}Full Judge0 CE sandboxes & LLM agent backend will integrate in Phase 2.
+            {description ?? (featureName ? `${featureName} uses simulated results.` : 'Features use simulated results.')}
           </span>
         </div>
         <div className="flex items-center gap-2 text-[11px] text-slate-400">

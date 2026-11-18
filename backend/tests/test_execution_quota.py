@@ -46,6 +46,7 @@ def test_execution_checks_shared_quota_before_judge0(
             return {"id": "submission"}
 
     monkeypatch.setattr(platform, "get_database_service", QuotaDatabase)
+    monkeypatch.setattr(platform.settings, "JUDGE0_API_URL", "http://judge0.test")
     judge = AsyncMock(return_value={"status": "accepted", "stdout": "42", "configured": True})
     monkeypatch.setattr(platform, "execute_code", judge)
     request = {"source_code": "print(42)", "language": "python"}

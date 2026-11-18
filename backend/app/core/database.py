@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
+from uuid import UUID
 
+import httpx
+from postgrest.exceptions import APIError
 from supabase import Client, create_client
 
-from backend.app.core.config import settings
+from backend.app.core.config import SupabaseConfigurationError, settings
 
 
-PUBLIC_PROBLEM_COLUMNS = (
+BASE_PROBLEM_COLUMNS = (
     "id",
     "title",
     "slug",
@@ -21,6 +24,9 @@ PUBLIC_PROBLEM_COLUMNS = (
     "is_published",
     "created_at",
     "updated_at",
+)
+PUBLIC_PROBLEM_COLUMNS = (
+    *BASE_PROBLEM_COLUMNS,
     "archived_at",
     "revision",
     "verified_revision",
@@ -45,11 +51,9 @@ class DatabaseService:
 
     def _require_client(self) -> Client:
         if not self.client:
-            raise RuntimeError(
-                self.configuration_error
-                or "Supabase PostgreSQL configuration is missing. Set SUPABASE_URL and "
-                "SUPABASE_SERVICE_ROLE_KEY before using the database service."
-            )
+            if self.configuration_error:
+                raise RuntimeError(self.configuration_error)
+            raise SupabaseConfigurationError()
         return self.client
 
     @staticmethod
@@ -99,25 +103,52 @@ class DatabaseService:
         return self._require_written_row(response, "problem")
 
     def get_problem(self, problem_id: str) -> Optional[Dict[str, Any]]:
+        try:
+            UUID(problem_id)
+        except ValueError:
+            return None
+
         client = self._require_client()
-        response = (
-            client.table("problems")
-            .select(",".join((*PUBLIC_PROBLEM_COLUMNS, "debugging_starter_code")))
-            .eq("id", problem_id)
-            .maybe_single()
-            .execute()
-        )
+        def read_problem(columns):
+            return (
+                client.table("problems").select(",".join(columns))
+                .eq("id", problem_id).maybe_single().execute()
+            )
+
+        try:
+            try:
+                response = read_problem((*PUBLIC_PROBLEM_COLUMNS, "debugging_starter_code"))
+            except APIError as exc:
+                if exc.code != "42703":
+                    raise
+                # The baseline catalog predates verified debugging variants.
+                response = read_problem(BASE_PROBLEM_COLUMNS)
+        except (APIError, httpx.HTTPError) as exc:
+            raise RuntimeError("Unable to retrieve the problem from Supabase.") from exc
         data = self._extract_data(response)
         return data if isinstance(data, dict) else None
 
     def list_problems(self, limit: int = 20, include_hidden: bool = False) -> List[Dict[str, Any]]:
         client = self._require_client()
-        query = client.table("problems").select(",".join(PUBLIC_PROBLEM_COLUMNS))
-        if not include_hidden:
-            query = query.eq("is_published", True)
-        response = query.order("created_at", desc=True).limit(limit).execute()
-        data = self._extract_data(response, [])
-        return list(data) if isinstance(data, list) else []
+        def read_catalog(columns):
+            query = client.table("problems").select(",".join(columns))
+            if not include_hidden:
+                query = query.eq("is_published", True)
+            return query.order("created_at", desc=True).limit(limit).execute()
+
+        try:
+            try:
+                response = read_catalog(PUBLIC_PROBLEM_COLUMNS)
+            except APIError as exc:
+                if exc.code != "42703":
+                    raise
+                response = read_catalog(BASE_PROBLEM_COLUMNS)
+        except (APIError, httpx.HTTPError) as exc:
+            raise RuntimeError("Unable to retrieve the problem catalog from Supabase.") from exc
+        data = self._extract_data(response)
+        if not isinstance(data, list):
+            raise RuntimeError("Supabase returned an invalid problem catalog response.")
+        return data
 
     def get_admin_problem(self, problem_id: str) -> Optional[Dict[str, Any]]:
         response = (
@@ -156,17 +187,22 @@ class DatabaseService:
 
     def list_public_problem_test_cases(self, problem_id: str, limit: int = 10) -> List[Dict[str, Any]]:
         client = self._require_client()
-        response = (
-            client.table("problem_test_cases")
-            .select("id,name,input_text,expected_output")
-            .eq("problem_id", problem_id)
-            .eq("is_hidden", False)
-            .order("created_at")
-            .limit(limit)
-            .execute()
-        )
-        data = self._extract_data(response, [])
-        return list(data) if isinstance(data, list) else []
+        try:
+            response = (
+                client.table("problem_test_cases")
+                .select("id,name,input_text,expected_output")
+                .eq("problem_id", problem_id)
+                .eq("is_hidden", False)
+                .order("created_at")
+                .limit(limit)
+                .execute()
+            )
+        except (APIError, httpx.HTTPError) as exc:
+            raise RuntimeError("Unable to retrieve public sample cases from Supabase.") from exc
+        data = self._extract_data(response)
+        if not isinstance(data, list):
+            raise RuntimeError("Supabase returned an invalid public samples response.")
+        return data
 
     def list_problem_hints(self, problem_id: str) -> List[str]:
         client = self._require_client()
@@ -220,8 +256,9 @@ class DatabaseService:
         return self._require_written_row(response, "problem")
 
     def consume_execution_quota(self, user_id: str, action: str, limit: int, window_seconds: int) -> int:
+        client = self._require_client()
         try:
-            response = self._require_client().rpc("consume_execution_quota", {
+            response = client.rpc("consume_execution_quota", {
                 "p_user_id": user_id,
                 "p_action": action,
                 "p_limit": limit,
@@ -239,12 +276,19 @@ class DatabaseService:
         response = client.table("submissions").insert(submission).select("*").execute()
         return self._require_written_row(response, "submission")
 
-    def list_submissions(self, user_id: Optional[str] = None, limit: int = 20) -> List[Dict[str, Any]]:
+    def list_submissions(
+        self, user_id: Optional[str] = None, limit: int = 20, *, problem_id: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
         client = self._require_client()
         query = client.table("submissions").select("*")
         if user_id:
             query = query.eq("user_id", user_id)
-        response = query.order("created_at", desc=True).limit(limit).execute()
+        if problem_id:
+            query = query.eq("problem_id", problem_id)
+        try:
+            response = query.order("created_at", desc=True).limit(limit).execute()
+        except (APIError, httpx.HTTPError) as exc:
+            raise RuntimeError("Unable to retrieve submission history from Supabase.") from exc
         data = self._extract_data(response, [])
         return list(data) if isinstance(data, list) else []
 
@@ -384,6 +428,45 @@ class DatabaseService:
             .execute()
         )
         return self._require_written_row(response, "course enrollment")
+
+    def list_mentor_conversations(self, user_id: str) -> List[Dict[str, Any]]:
+        response = (
+            self._require_client().table("mentor_conversations")
+            .select("id,topic,status,mode,updated_at").eq("user_id", user_id)
+            .order("updated_at", desc=True).limit(50).execute()
+        )
+        return self._extract_data(response, [])
+
+    def get_mentor_conversation(self, user_id: str, conversation_id: str) -> Optional[Dict[str, Any]]:
+        response = (
+            self._require_client().table("mentor_conversations")
+            .select("id,topic,status,mode,revision,updated_at")
+            .eq("id", conversation_id).eq("user_id", user_id).maybe_single().execute()
+        )
+        return self._extract_data(response)
+
+    def list_mentor_messages(
+        self, user_id: str, conversation_id: str, limit: int = 100, turn_id: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        query = (
+            self._require_client().table("mentor_messages")
+            .select("id,message,message_kind,sources,created_at")
+            .eq("conversation_id", conversation_id).eq("sender_id", user_id)
+        )
+        if turn_id:
+            query = query.eq("turn_id", turn_id)
+        response = query.order("created_at", desc=True).order("message_kind").limit(limit).execute()
+        return list(reversed(self._extract_data(response, [])))
+
+    def append_mentor_turn(self, turn: Dict[str, Any]) -> bool:
+        response = self._require_client().rpc("append_mentor_turn", turn).execute()
+        return self._extract_data(response) is True
+
+    def retrieve_curriculum(self, embedding: List[float], model: str) -> List[Dict[str, Any]]:
+        response = self._require_client().rpc("retrieve_curriculum", {
+            "p_embedding": embedding, "p_model": model,
+        }).execute()
+        return self._extract_data(response, [])
 
     def create_mentor_conversation(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         client = self._require_client()

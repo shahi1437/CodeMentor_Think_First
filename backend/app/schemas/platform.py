@@ -1,4 +1,5 @@
 from typing import Dict, List, Literal, Optional
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -76,12 +77,66 @@ class MentorRequest(BaseModel):
     student_context: str = Field(default="", max_length=3000)
     mode: Literal["socratic", "conceptual"] = "socratic"
     history: List[MentorMessage] = Field(default_factory=list, max_length=12)
+    conversation_id: UUID | None = None
+    request_id: UUID | None = None
+
+
+class MentorSource(BaseModel):
+    id: str
+    title: str
+    source_url: str | None = None
+    license: str
 
 
 class MentorResponse(BaseModel):
     answer: str
     source: str
     safe_mode: bool
+    conversation_id: str
+    sources: list[MentorSource] = Field(default_factory=list)
+
+
+class CodeAnalysisRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    language: Literal["python"] = "python"
+    source_code: str = Field(..., min_length=1, max_length=100_000)
+
+
+class CodeAnalysisParseError(BaseModel):
+    line: Optional[int] = None
+    offset: Optional[int] = None
+    message: str
+
+
+class CodeAnalysisFunction(BaseModel):
+    name: str
+    line: int
+    arguments: List[str] = Field(default_factory=list)
+    recursive: bool = False
+
+
+class CodeAnalysisFinding(BaseModel):
+    label: str
+    severity: str
+    description: str
+
+
+class CodeAnalysisResponse(BaseModel):
+    language: Literal["python"]
+    analysis_type: Literal["python_ast"]
+    valid_syntax: bool
+    parse_error: Optional[CodeAnalysisParseError] = None
+    functions: List[CodeAnalysisFunction] = Field(default_factory=list)
+    loops: int = 0
+    branches: int = 0
+    max_loop_depth: int = 0
+    time_complexity: str
+    space_complexity: str
+    findings: List[CodeAnalysisFinding] = Field(default_factory=list)
+    estimates_are_heuristic: bool = True
+    complexity_basis: str
+    limitations: List[str] = Field(default_factory=list)
 
 
 class LearningDNAResponse(BaseModel):

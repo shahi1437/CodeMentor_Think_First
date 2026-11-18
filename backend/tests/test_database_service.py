@@ -1,10 +1,15 @@
 import pytest
 from fastapi import HTTPException
+from fastapi.testclient import TestClient
+from postgrest.exceptions import APIError
 
+from backend.app.api.v1.endpoints import platform
 from backend.app.api.v1.endpoints.platform import get_profile
+from backend.app.core.auth import get_current_user
 from backend.app.core.config import settings
 from backend.app.core.database import DatabaseService
 from backend.app.core.role_store import InactiveAccountError, SupabaseRoleRepository
+from backend.app.main import app
 from backend.app.schemas.auth import UserProfile, UserRole
 
 
@@ -275,9 +280,10 @@ def test_teacher_course_enrollment_count_includes_only_active_rows():
 
 
 def test_problem_queries_do_not_select_hidden_test_cases():
+    problem_id = "7f63a85c-a88a-4053-b611-844ea4d670b8"
     client = FakeSupabaseClient({
         "problems": [{
-            "id": "problem-1",
+            "id": problem_id,
             "title": "Public problem",
             "is_published": True,
             "hidden_test_cases": [{"input": "secret", "expected_output": "private"}],
@@ -285,11 +291,62 @@ def test_problem_queries_do_not_select_hidden_test_cases():
     })
     service = DatabaseService(client=client)
 
-    problem = service.get_problem("problem-1")
+    problem = service.get_problem(problem_id)
     problems = service.list_problems()
 
-    assert problem == {"id": "problem-1", "title": "Public problem", "is_published": True}
-    assert problems == [{"id": "problem-1", "title": "Public problem", "is_published": True}]
+    assert problem == {"id": problem_id, "title": "Public problem", "is_published": True}
+    assert problems == [{"id": problem_id, "title": "Public problem", "is_published": True}]
+
+
+def test_published_catalog_supports_baseline_schema(monkeypatch):
+    problem_id = "7f63a85c-a88a-4053-b611-844ea4d670b8"
+    published = {"id": problem_id, "title": "Published problem", "is_published": True}
+    draft = {"id": "draft", "is_published": False}
+    client = FakeSupabaseClient({"problems": [published, draft]})
+    select = FakeTable.select
+
+    def select_baseline_only(table, columns, **kwargs):
+        if "archived_at" in columns:
+            raise APIError({"code": "42703", "message": "Column does not exist"})
+        return select(table, columns, **kwargs)
+
+    monkeypatch.setattr(FakeTable, "select", select_baseline_only)
+    service = DatabaseService(client=client)
+    assert service.list_problems() == [published]
+    assert service.get_problem(problem_id) == published
+
+
+@pytest.mark.parametrize("problem_id", ["p-1", "7f63a85c-a88a-4053-b611-844ea4d670b8"])
+@pytest.mark.parametrize("suffix", ["", "/samples"])
+def test_problem_reads_return_404_for_missing_records(monkeypatch, problem_id, suffix):
+    student = UserProfile(id="student", email="student@example.com", role=UserRole.STUDENT)
+    service = DatabaseService(client=FakeSupabaseClient({"problems": []}))
+    monkeypatch.setattr(platform, "get_database_service", lambda: service)
+    monkeypatch.setitem(app.dependency_overrides, get_current_user, lambda: student)
+
+    with TestClient(app) as client:
+        response = client.get(f"/api/v1/platform/problems/{problem_id}{suffix}")
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Problem not found."}
+
+
+def test_workspace_history_filters_by_student_and_problem(monkeypatch):
+    student = UserProfile(id="student", email="student@example.com", role=UserRole.STUDENT)
+    problem_id = "7f63a85c-a88a-4053-b611-844ea4d670b8"
+    own_submission = {"id": "own", "problem_id": problem_id, "user_id": student.id}
+    rows = [
+        {"id": "other-problem", "problem_id": "other", "user_id": student.id},
+        {"id": "other-student", "problem_id": problem_id, "user_id": "someone-else"},
+        {**own_submission, "runtime_metadata": {"hidden_output": "private"}},
+    ]
+    service = DatabaseService(client=FakeSupabaseClient({"submissions": rows}))
+    monkeypatch.setattr(platform, "get_database_service", lambda: service)
+    monkeypatch.setitem(app.dependency_overrides, get_current_user, lambda: student)
+
+    with TestClient(app) as client:
+        response = client.get("/api/v1/platform/submissions", params={"problem_id": problem_id})
+    assert response.status_code == 200
+    assert response.json() == [own_submission]
 
 
 def test_database_service_reads_learning_submissions_for_the_requested_user():

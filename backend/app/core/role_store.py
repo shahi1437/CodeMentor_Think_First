@@ -2,7 +2,7 @@ from typing import Optional, Protocol, Union
 
 from supabase import Client, create_client
 
-from backend.app.core.config import settings
+from backend.app.core.config import SupabaseConfigurationError, settings
 from backend.app.schemas.auth import UserRole
 
 
@@ -23,9 +23,7 @@ class SupabaseRoleRepository:
 
     def __init__(self, client: Optional[Client] = None):
         if not settings.SUPABASE_URL or not settings.SUPABASE_SERVICE_ROLE_KEY:
-            raise RuntimeError(
-                "Supabase database configuration is missing. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY before using database-backed role persistence."
-            )
+            raise SupabaseConfigurationError()
         self.client = client or create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_ROLE_KEY)
 
     @staticmethod
@@ -84,14 +82,10 @@ class NullRoleRepository:
     """Repository that fails explicitly when database-backed roles are unavailable."""
 
     def get_user_role(self, user_id: str) -> Optional[UserRole]:
-        raise RuntimeError(
-            "Role verification requires Supabase. Configure SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY."
-        )
+        raise SupabaseConfigurationError()
 
     def set_user_role(self, user_id: str, role: Union[UserRole, str]) -> UserRole:
-        raise RuntimeError(
-            "Role assignment requires Supabase. Configure SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY."
-        )
+        raise SupabaseConfigurationError()
 
 
 _role_repository: Optional[RoleRepository] = None

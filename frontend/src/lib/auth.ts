@@ -1,37 +1,46 @@
-import { Role } from '@/types';
+import { BackendRequestError, backendRequestWithToken } from '@/lib/backend';
+import type { Role } from '@/types';
 
-export type AuthSession = {
-  role: Role;
-  email: string;
-  full_name?: string | null;
-  id?: string;
+const portalPaths: Record<Role, string> = {
+  student: '/dashboard',
+  teacher: '/teacher',
+  admin: '/admin',
 };
 
-export function normalizeRole(value: string | null | undefined): Role {
-  if (value === 'teacher') return 'teacher';
-  if (value === 'admin') return 'admin';
-  return 'student';
+const studentPaths = [
+  '/dashboard', '/assessment', '/problems', '/workspace', '/analyzer',
+  '/mentor', '/learning-dna', '/daily-plan', '/history',
+];
+
+const isWithin = (path: string, base: string) => path === base || path.startsWith(base + '/');
+
+export function requiredPortal(path: string): Role | undefined {
+  if (isWithin(path, '/admin')) return 'admin';
+  if (isWithin(path, '/teacher')) return 'teacher';
+  if (studentPaths.some((base) => isWithin(path, base))) return 'student';
 }
 
-export function getStoredSession(): AuthSession | null {
-  if (typeof window === 'undefined') return null;
-  const raw = localStorage.getItem('codementor_session');
-  if (!raw) return null;
+export function canAccessPortal(role: Role, portal: Role) {
+  return role === portal || (role === 'admin' && portal === 'teacher');
+}
 
-  try {
-    const parsed = JSON.parse(raw) as AuthSession;
-    return parsed && parsed.role ? parsed : null;
-  } catch {
-    return null;
+export function portalDestination(role: Role, requestedPath?: string | null) {
+  if (requestedPath?.startsWith('/') && !requestedPath.startsWith('//')) {
+    const origin = 'http://localhost';
+    const url = new URL(requestedPath, origin);
+    const portal = requiredPortal(url.pathname);
+    if (url.origin === origin && portal && canAccessPortal(role, portal)) {
+      return url.pathname + url.search;
+    }
   }
+  return portalPaths[role];
 }
 
-export function setStoredSession(session: AuthSession) {
-  if (typeof window === 'undefined') return;
-  localStorage.setItem('codementor_session', JSON.stringify(session));
-}
-
-export function clearStoredSession() {
-  if (typeof window === 'undefined') return;
-  localStorage.removeItem('codementor_session');
+export async function getVerifiedRole(accessToken: string): Promise<Role> {
+  const profile = await backendRequestWithToken<{ role?: unknown } | null>('/auth/me', accessToken, {
+    signal: AbortSignal.timeout(8000),
+  });
+  const role = profile?.role;
+  if (role === 'student' || role === 'teacher' || role === 'admin') return role;
+  throw new BackendRequestError('The backend could not verify your account role.', 503);
 }

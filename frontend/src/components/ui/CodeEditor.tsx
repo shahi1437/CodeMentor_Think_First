@@ -6,6 +6,7 @@ import { Copy, RotateCcw, Check, Code } from 'lucide-react';
 
 interface CodeEditorProps {
   initialCode: string;
+  value?: string;
   language?: 'python' | 'javascript' | 'cpp';
   supportedLanguages?: Array<'python' | 'javascript' | 'cpp'>;
   onCodeChange?: (code: string) => void;
@@ -17,6 +18,7 @@ interface CodeEditorProps {
 
 export const CodeEditor: React.FC<CodeEditorProps> = ({
   initialCode,
+  value,
   language = 'python',
   supportedLanguages = ['python', 'javascript', 'cpp'],
   onCodeChange,
@@ -28,7 +30,7 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
   const [uncontrolledCode, setUncontrolledCode] = useState(initialCode);
   const [copied, setCopied] = useState(false);
   const [uncontrolledLang, setUncontrolledLang] = useState<'python' | 'javascript' | 'cpp'>(language);
-  const code = onCodeChange ? initialCode : uncontrolledCode;
+  const code = onCodeChange ? (value ?? initialCode) : uncontrolledCode;
   const selectedLang = onLanguageChange ? language : uncontrolledLang;
 
   const handleEditorChange = (value?: string) => {
