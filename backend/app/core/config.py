@@ -1,4 +1,5 @@
 from typing import List
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -16,6 +17,9 @@ class Settings(BaseSettings):
     # Judge0 CE Execution
     JUDGE0_API_URL: str = ""
     JUDGE0_AUTH_TOKEN: str = ""
+    EXECUTION_RATE_WINDOW_SECONDS: int = Field(default=60, ge=1, le=3600)
+    EXECUTION_RUN_LIMIT: int = Field(default=20, ge=1, le=10000)
+    EXECUTION_SUBMIT_LIMIT: int = Field(default=3, ge=1, le=10000)
 
     # LLM / AI Mentor configuration
     LLM_API_URL: str = ""

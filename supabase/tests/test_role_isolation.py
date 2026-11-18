@@ -1,6 +1,7 @@
 """Exercise the disposable Supabase stack through actual signed-in Auth sessions."""
 
 import os
+from concurrent.futures import ThreadPoolExecutor
 import subprocess
 from collections.abc import Iterator
 from pathlib import Path
@@ -171,3 +172,31 @@ def test_teacher_active_enrollment_and_admin_scope(stack, fixtures):
     for table, ids in (("profiles", profile_ids), ("submissions", submissions.values()),
                        ("mentor_conversations", conversations.values()), ("problem_test_cases", [sample, secret_case])):
         assert read_ids(client, admin, table, ids) == set(ids)
+
+
+def test_shared_quota_is_atomic_across_requests(stack, fixtures):
+    client, settings = stack
+    users = fixtures[0]
+    url = "/rest/v1/rpc/consume_execution_quota"
+    service = headers(settings["SERVICE_ROLE_KEY"])
+
+    def consume(user, action):
+        return client.post(url, headers=service, json={
+            "p_user_id": users[user][0], "p_action": action, "p_limit": 3,
+            "p_window_seconds": 3600,
+        })
+
+    with ThreadPoolExecutor(max_workers=12) as executor:
+        responses = list(executor.map(lambda _: consume("active", "run"), range(12)))
+    for response in responses:
+        successful(response, "Consume execution quota")
+    retry_delays = [response.json() for response in responses]
+    assert retry_delays.count(0) == 3
+    assert sum(delay > 0 for delay in retry_delays) == 9
+    assert consume("paused", "run").json() == 0
+    assert consume("active", "submit").json() == 0
+    result = client.post(url, headers=users["active"][1], json={
+        "p_user_id": users["active"][0], "p_action": "run", "p_limit": 100,
+        "p_window_seconds": 3600,
+    })
+    assert result.status_code in {403, 404}

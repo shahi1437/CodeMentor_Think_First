@@ -32,7 +32,15 @@ def create_test_token(sub: str, email: str, role: str, expires_in: int = 3600) -
     return jwt.encode(payload, settings.SUPABASE_JWT_SECRET, algorithm="HS256")
 
 
-def test_execution_endpoint_returns_safe_unconfigured_response():
+@pytest.fixture
+def available_execution_quota(monkeypatch):
+    async def allow(_database, _user_id, _action):
+        return None
+
+    monkeypatch.setattr(platform, "enforce_execution_quota", allow)
+
+
+def test_execution_endpoint_returns_safe_unconfigured_response(available_execution_quota):
     token = create_test_token("student-exec", "student@example.com", "student")
     headers = {"Authorization": f"Bearer {token}"}
     response = client.post(
@@ -545,7 +553,7 @@ def test_submission_verdicts_map_to_database_constraint_values():
     assert platform._submission_database_status("configuration_error") == "error"
 
 
-def test_submit_unconfigured_execution_does_not_report_wrong_answer(monkeypatch):
+def test_submit_unconfigured_execution_does_not_report_wrong_answer(monkeypatch, available_execution_quota):
     stored = {}
 
     class ConfiguredDatabase:
@@ -579,7 +587,7 @@ def test_submit_unconfigured_execution_does_not_report_wrong_answer(monkeypatch)
     assert stored["runtime_metadata"]["verdict"] == "configuration_error"
 
 
-def test_submission_uses_backend_test_cases_without_returning_hidden_data(monkeypatch):
+def test_submission_uses_backend_test_cases_without_returning_hidden_data(monkeypatch, available_execution_quota):
     stored = {}
     executed_inputs = []
     grading_cases = [

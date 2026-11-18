@@ -194,6 +194,21 @@ class DatabaseService:
         response = client.table("problems").update(updates).eq("id", problem_id).select("*").execute()
         return self._require_written_row(response, "problem")
 
+    def consume_execution_quota(self, user_id: str, action: str, limit: int, window_seconds: int) -> int:
+        try:
+            response = self._require_client().rpc("consume_execution_quota", {
+                "p_user_id": user_id,
+                "p_action": action,
+                "p_limit": limit,
+                "p_window_seconds": window_seconds,
+            }).execute()
+        except Exception as exc:
+            raise RuntimeError("The shared execution quota is unavailable.") from exc
+        retry_after = self._extract_data(response)
+        if type(retry_after) is not int or retry_after < 0:
+            raise RuntimeError("The shared execution quota returned an invalid response.")
+        return retry_after
+
     def create_submission(self, submission: Dict[str, Any]) -> Dict[str, Any]:
         client = self._require_client()
         response = client.table("submissions").insert(submission).select("*").execute()

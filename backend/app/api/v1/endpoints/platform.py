@@ -11,6 +11,7 @@ from backend.app.core.ai_mentor import (
 )
 from backend.app.core.database import PUBLIC_PROBLEM_FIELDS, get_database_service
 from backend.app.core.config import settings
+from backend.app.core.execution_quota import enforce_execution_quota
 from backend.app.core.judge0 import execute_code
 from backend.app.core.learning_dna import summarize_learning_dna
 from backend.app.core.ml_classifier import ErrorClassifier
@@ -255,6 +256,7 @@ async def list_submissions(current_user: UserProfile = Depends(require_student))
 
 @router.post("/execute", response_model=ExecuteResponse)
 async def execute_platform_code(payload: ExecuteRequest, current_user: UserProfile = Depends(require_student)):
+    await enforce_execution_quota(get_database_service(), current_user.id, "run")
     result = await execute_code(payload.language, payload.source_code, payload.stdin)
     return ExecuteResponse(
         status=result.get("status", "error"),
@@ -311,6 +313,7 @@ async def submit_code(payload: SubmissionRequest, current_user: UserProfile = De
             detail=f"This problem exceeds the {MAX_GRADING_TEST_CASES}-case grading limit.",
         )
 
+    await enforce_execution_quota(database, current_user.id, "submit")
     grading_cases = [
         TestCaseInput(
             input=test_case.get("input_text") or "",
