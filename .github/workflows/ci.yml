@@ -52,3 +52,31 @@ jobs:
               raise SystemExit("Duplicate Supabase migration version found.")
           print(f"Validated {len(files)} uniquely versioned migrations.")
           PY
+
+  supabase-role-isolation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: supabase/setup-cli@v3
+        with:
+          version: "3.0.0"
+      - run: python -m pip install pytest httpx
+      - name: Start a disposable local stack and test signed-in accounts
+        shell: bash
+        run: |
+          export CODEMENTOR_SUPABASE_TEST_WORKDIR="$(mktemp -d)"
+          cd "$CODEMENTOR_SUPABASE_TEST_WORKDIR"
+          supabase init
+          mkdir -p supabase/migrations
+          cp "$GITHUB_WORKSPACE"/supabase/migrations/*.sql supabase/migrations/
+          trap 'cd "$CODEMENTOR_SUPABASE_TEST_WORKDIR" && supabase stop --no-backup >/dev/null 2>&1 || true' EXIT
+          if ! supabase start -x realtime,storage-api,imgproxy,postgres-meta,studio,edge-runtime,logflare,vector,supavisor,mailpit >supabase-start.log 2>&1; then
+            grep -E '^Applying migration|^ERROR:|^failed to ' supabase-start.log || true
+            exit 1
+          fi
+          cd "$GITHUB_WORKSPACE"
+          python -m pytest supabase/tests -q
