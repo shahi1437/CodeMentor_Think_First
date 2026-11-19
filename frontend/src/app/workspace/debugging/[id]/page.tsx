@@ -18,6 +18,7 @@ import {
 import { AppShell } from '@/components/layout/AppShell';
 import { CodeEditor } from '@/components/ui/CodeEditor';
 import { backendRequest, type PlatformRunResult } from '@/lib/backend';
+import { isExecutionAccepted, problemDifficultyLabel } from '@/lib/problem-catalog';
 
 type Language = 'python' | 'javascript' | 'cpp';
 interface ProblemRecord {
@@ -144,7 +145,7 @@ export default function DebuggingLabWorkspace() {
         source_code: code,
         stdin: sample.input_text,
       });
-      if (result.status !== 'success') {
+      if (!isExecutionAccepted(result.status)) {
         throw new Error(result.message || result.stderr || result.compile_output || 'Sample execution did not complete successfully.');
       }
       setSampleOutput(String(result.stdout || ''));
@@ -237,7 +238,7 @@ export default function DebuggingLabWorkspace() {
               </span>
               <span className="font-bold text-white">{problem.title}</span>
               <span className="rounded bg-amber-500/10 px-1.5 py-0.2 text-[10px] font-semibold text-amber-400">
-                {problem.difficulty}
+                {problemDifficultyLabel(problem.difficulty)}
               </span>
             </div>
           </div>
