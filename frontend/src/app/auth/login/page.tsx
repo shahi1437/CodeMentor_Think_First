@@ -3,12 +3,11 @@
 import React, { Suspense, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { ArrowRight, CheckCircle2, Code2, GraduationCap, Shield, User } from 'lucide-react';
+import { ArrowRight, CheckCircle2, Code2 } from 'lucide-react';
 import { AppShell } from '@/components/layout/AppShell';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import { getVerifiedRole, portalDestination } from '@/lib/auth';
 import { getSupabaseConfig, supabaseConfigMessage } from '@/lib/supabase/config';
-import { Role } from '@/types';
 
 const authMessages: Record<string, string> = {
   configuration: supabaseConfigMessage,
@@ -31,7 +30,6 @@ function LoginForm() {
   const authError = search.get('authError');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [selectedRole, setSelectedRole] = useState<Role>('student');
   const [isLoading, setIsLoading] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -78,41 +76,17 @@ function LoginForm() {
               </p>
             </div>
 
-            <div className="mt-6">
-              <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-                Account examples
-              </label>
-              <div className="mt-2 grid grid-cols-3 gap-2">
-                {(['student', 'teacher', 'admin'] as Role[]).map((role) => (
-                  <button
-                    key={role}
-                    type="button"
-                    onClick={() => setSelectedRole(role)}
-                    aria-pressed={selectedRole === role}
-                    className={`flex flex-col items-center justify-center rounded-xl p-2.5 text-xs transition-all border ${
-                      selectedRole === role
-                        ? role === 'student'
-                          ? 'border-indigo-500 bg-indigo-600/20 text-indigo-300 font-semibold'
-                          : role === 'teacher'
-                            ? 'border-teal-500 bg-teal-600/20 text-teal-300 font-semibold'
-                            : 'border-rose-500 bg-rose-600/20 text-rose-300 font-semibold'
-                        : 'border-slate-800 bg-navy-950/60 text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    {role === 'student' ? <User className="h-4 w-4 mb-1" /> : role === 'teacher' ? <GraduationCap className="h-4 w-4 mb-1" /> : <Shield className="h-4 w-4 mb-1" />}
-                    <span className="capitalize">{role}</span>
-                  </button>
-                ))}
-              </div>
-              <p className="mt-2 text-xs text-slate-400">Example addresses are for reference. Sign in with your own account.</p>
-            </div>
+            <p className="mt-3 text-xs text-slate-400">
+              Sign in with your own account. Your role (Student, Teacher, or Administrator) is
+              verified automatically from your saved profile.
+            </p>
 
             <form onSubmit={handleSubmit} className="mt-6 space-y-4">
               <div>
                 <label className="text-xs font-medium text-slate-300">Email Address</label>
                 <input
                   type="email"
-                  placeholder={`${selectedRole}@example.com`}
+                  placeholder="you@example.com"
                   autoComplete="username"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}

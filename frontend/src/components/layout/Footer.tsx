@@ -1,8 +1,41 @@
-import React from 'react';
+'use client';
+
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Code2, Heart, Shield, Cpu, Terminal, BookOpen } from 'lucide-react';
+import { canAccessPortal, getVerifiedRole } from '@/lib/auth';
+import { getSupabaseBrowserClient } from '@/lib/supabase/client';
+import type { Role } from '@/types';
 
 export const Footer: React.FC = () => {
+  const [role, setRole] = useState<Role | null>(null);
+
+  useEffect(() => {
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) return;
+
+    let sessionVersion = 0;
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      const version = ++sessionVersion;
+      setRole(null);
+      if (!session) return;
+      setTimeout(() => {
+        if (version !== sessionVersion) return;
+        void getVerifiedRole(session.access_token).then((verified) => {
+          if (version === sessionVersion) setRole(verified);
+        }).catch(() => { /* Unverified visitors see public links only. */ });
+      }, 0);
+    });
+
+    return () => {
+      sessionVersion++;
+      authListener.subscription.unsubscribe();
+    };
+  }, []);
+
+  const canViewTeacherPortal = role !== null && canAccessPortal(role, 'teacher');
+  const canViewAdminPortal = role !== null && canAccessPortal(role, 'admin');
+
   return (
     <footer className="w-full border-t border-slate-800/80 bg-navy-950/90 pt-12 pb-8 text-slate-400">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
@@ -78,17 +111,23 @@ export const Footer: React.FC = () => {
           <div>
             <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-200">Institutional</h4>
             <ul className="mt-3 space-y-2 text-xs">
+              {canViewTeacherPortal && (
+                <li>
+                  <Link href="/teacher" className="hover:text-teal-400 transition-colors">Teacher Cohort Radar</Link>
+                </li>
+              )}
+              {canViewAdminPortal && (
+                <>
+                  <li>
+                    <Link href="/admin" className="hover:text-teal-400 transition-colors">Admin Health & Sandbox</Link>
+                  </li>
+                  <li>
+                    <Link href="/admin/problems/new" className="hover:text-teal-400 transition-colors">Problem Studio</Link>
+                  </li>
+                </>
+              )}
               <li>
-                <Link href="/teacher" className="hover:text-teal-400 transition-colors">Teacher Cohort Radar</Link>
-              </li>
-              <li>
-                <Link href="/admin" className="hover:text-teal-400 transition-colors">Admin Health & Sandbox</Link>
-              </li>
-              <li>
-                <Link href="/admin/problems/new" className="hover:text-teal-400 transition-colors">Problem Studio</Link>
-              </li>
-              <li>
-                <Link href="/auth/login" className="hover:text-teal-400 transition-colors">Role Login</Link>
+                <Link href="/auth/login" className="hover:text-teal-400 transition-colors">Sign In</Link>
               </li>
             </ul>
           </div>

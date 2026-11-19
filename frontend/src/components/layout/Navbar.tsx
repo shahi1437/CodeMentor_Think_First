@@ -19,7 +19,7 @@ import {
   Terminal,
   X,
 } from 'lucide-react';
-import { getVerifiedRole, portalDestination } from '@/lib/auth';
+import { canAccessPortal, getVerifiedRole, portalDestination } from '@/lib/auth';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import { Role } from '@/types';
 
@@ -68,7 +68,7 @@ export const Navbar: React.FC = () => {
     setIsSigningOut(true);
     setSignOutError('');
     try {
-      const { error } = await supabase.auth.signOut();
+      const { error } = await supabase.auth.signOut({ scope: 'local' });
       if (error) throw error;
       window.location.replace('/auth/login');
     } catch {
@@ -77,7 +77,15 @@ export const Navbar: React.FC = () => {
     }
   };
 
-  const navLinks = [
+  type NavLink = {
+    label: string;
+    href: string;
+    icon: React.ComponentType<{ className?: string }>;
+    modeTag?: string;
+    role?: Role;
+  };
+
+  const navLinks: NavLink[] = [
     { label: 'Problem Hub', href: '/problems', icon: Layers },
     { label: 'Normal Coding', href: '/problems?mode=normal', icon: Code2, modeTag: 'Normal' },
     { label: 'Debugging Lab', href: '/problems?mode=debugging', icon: Bug, modeTag: 'Debug' },
@@ -88,6 +96,10 @@ export const Navbar: React.FC = () => {
     { label: 'Teacher', href: '/teacher', icon: GraduationCap, role: 'teacher' },
     { label: 'Admin', href: '/admin', icon: ShieldCheck, role: 'admin' },
   ];
+
+  const visibleNavLinks = navLinks.filter(
+    (item) => !item.role || (currentRole !== null && canAccessPortal(currentRole, item.role)),
+  );
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-slate-800/80 bg-navy-950/85 backdrop-blur-xl">
@@ -217,7 +229,7 @@ export const Navbar: React.FC = () => {
       {mobileMenuOpen && (
         <div className="border-b border-slate-800 bg-navy-950 px-4 pt-2 pb-6 lg:hidden animate-in slide-in-from-top-4">
           <div className="grid grid-cols-2 gap-2 pt-2">
-            {navLinks.map((item) => {
+            {visibleNavLinks.map((item) => {
               const Icon = item.icon;
               return (
                 <Link

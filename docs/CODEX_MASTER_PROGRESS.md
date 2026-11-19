@@ -270,3 +270,30 @@ Phase 1–10-এর বিষয়গুলো আগের `IMPLEMENTATION_STATUS
 - Backend · `app/core/{auth,config,database,role_store,judge0,execution_quota}.py`, `app/api/v1/endpoints/platform.py` এবং সক্রিয়, Git-ignored `backend/.env`।
 - Frontend · `src/lib/backend-url.ts`, `src/lib/backend.ts`, `src/lib/supabase/config.ts`, `src/app/auth/register/page.tsx`, `src/components/layout/Navbar.tsx`, `src/app/workspace/coding/[id]/page.tsx` ও `package.json`।
 - Tests ও নথি · `backend/tests/{conftest,test_auth,test_unit_auth,test_jwks_auth,test_platform_services,test_execution_quota}.py`, `frontend/tests/runtime-config.test.mjs`, `.github/workflows/ci.yml`, `README.md` এবং এই ট্র্যাকার।
+
+## Auth role-routing fix · ১৯ নভেম্বর ২০২৬
+
+**অবস্থা — লোকালে যাচাইকৃত।** Role-based login ও navigation-এর আসল কারণ ঠিক করা হয়েছে; কোনো production migration, deploy বা বিদ্যমান account-এর role পরিবর্তন করা হয়নি।
+
+### মূল কারণ ও সমাধান
+
+- **কারণ:** access matrix-এ teacher ও admin-কে student portal-এ ঢোকার অনুমতি দেওয়া ছিল না, অথচ backend `require_student` তিন role-কেই অনুমতি দেয়। ফলে admin/teacher-এর `/problems`-এর মতো student page খুললে proxy তাঁদের নিজের portal-এ ফেরত পাঠাত, যা "student page admin-এ redirect" হিসেবে দেখা যাচ্ছিল। এর সঙ্গে login পেজের ভ্রান্ত Student/Teacher/Admin বাটন এবং পুরোনো session-এর অবশিষ্ট cookie বিভ্রান্তি বাড়াচ্ছিল।
+- **সমাধান:** নতুন `src/lib/auth-access.ts`-এ একক matrix — student → student only; teacher → student + teacher; admin → student + teacher + admin। Proxy, login redirect এবং navigation সবাই একই matrix ব্যবহার করে। Role সর্বদা FastAPI `/auth/me` (persisted Supabase profile) থেকে আসে; UI বাটন বা JWT metadata থেকে নয়।
+- Login page থেকে role-selection বাটন সরানো হয়েছে (শুধু email/password) এবং `redirectTo` শুধু same-origin অনুমোদিত path গ্রহণ করে (open redirect প্রতিরোধ)।
+- Navbar ও Footer-এ Teacher/Admin link কেবল verified role অনুযায়ী দেখানো হয়; sign-out এখন `scope: 'local'` সহ সম্পূর্ণ reload করে, তাই stale session ভূমিকা রাখতে পারে না।
+
+### যাচাই
+
+| যাচাই | ফল |
+| --- | --- |
+| Student | login → `/dashboard`, ROLE student, refresh-এ অপরিবর্তিত; `/admin` ও `/teacher` → `/dashboard`; nav/footer-এ Teacher/Admin link নেই। |
+| Teacher | login → `/teacher`, ROLE teacher; `/problems` খোলে; `/admin` → `/teacher`; শুধু Teacher link দেখা যায়। |
+| Admin | `/admin`, `/teacher`, `/dashboard` ও `/problems` সবই খোলে; সব portal link দেখা যায়। |
+| Account switching | Admin sign out → login page, cookie শূন্য → disposable student password login → `/dashboard`, refresh-এর পরেও কোনো Admin state নেই। |
+| Redirect safety | `//evil.example`, `https://evil.example`, `/\evil.example` ও `javascript:` payload ফিরে আসে role-এর default dashboard-এ; permitted deep link অপরিবর্তিত থাকে (loop নেই)। |
+| Regression tests | frontend `npm test` — 25 pass (এর মধ্যে auth matrix/portal: 14 cases, 18 behavioral scenarios); `lint` ও `tsc --noEmit` clean; backend `pytest` — 150 pass; `git diff --check` clean। |
+
+### পরিবর্তিত ফাইল
+
+- `frontend/src/lib/auth-access.ts` (নতুন), `frontend/src/lib/auth.ts`, `frontend/src/app/auth/login/page.tsx`, `frontend/src/components/layout/{Navbar,Footer}.tsx`, `frontend/tests/auth-access.test.mjs` (নতুন), `frontend/package.json`।
+- Disposable test account (`student.e2e.20261119`, `teacher.e2e.20261119`) শুধু লোকাল helper দিয়ে ব্যবহৃত; কোনো credential print, log বা commit হয়নি। Admin account অপরিবর্তিত।
