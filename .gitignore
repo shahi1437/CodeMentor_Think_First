@@ -45,3 +45,6 @@ yarn-error.log*
 thumbs.db
 # TypeScript build cache
 *.tsbuildinfo
+
+# Local problem seed pack (contains hidden test cases and reference solutions)
+backend/scripts/seed_problem_catalog.py

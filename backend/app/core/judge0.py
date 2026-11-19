@@ -60,7 +60,7 @@ def build_judge0_payload(language: str, source_code: str, stdin: str = "") -> Di
 
 
 async def _request_submission(payload: Dict[str, Any]) -> Dict[str, Any]:
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(trust_env=False) as client:
         response = await client.post(
             f"{settings.JUDGE0_API_URL.rstrip('/')}/submissions/?base64_encoded=false",
             json=payload,
@@ -72,7 +72,7 @@ async def _request_submission(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 async def _poll_submission(token: str, timeout_seconds: int = 20) -> Dict[str, Any]:
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(trust_env=False) as client:
         deadline = time.monotonic() + timeout_seconds
         while time.monotonic() < deadline:
             response = await client.get(
