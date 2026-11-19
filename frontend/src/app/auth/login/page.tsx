@@ -35,9 +35,10 @@ function LoginForm() {
   const [isLoading, setIsLoading] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const notice = errorMsg ?? (!getSupabaseConfig()
+  const config = getSupabaseConfig();
+  const notice = errorMsg ?? (!config
     ? supabaseConfigMessage
-    : authError && Object.hasOwn(authMessages, authError) ? authMessages[authError] : '');
+    : authError && authError !== 'configuration' && Object.hasOwn(authMessages, authError) ? authMessages[authError] : '');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

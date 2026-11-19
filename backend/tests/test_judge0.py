@@ -34,6 +34,7 @@ def test_judge0_terminal_status_mapping(description, expected):
 @pytest.mark.asyncio
 async def test_judge0_sends_auth_token_using_ce_header(monkeypatch):
     requests = []
+    client_options = []
 
     class FakeResponse:
         def raise_for_status(self):
@@ -43,6 +44,9 @@ async def test_judge0_sends_auth_token_using_ce_header(monkeypatch):
             return {"token": "submission-token"}
 
     class FakeClient:
+        def __init__(self, **kwargs):
+            client_options.append(kwargs)
+
         async def __aenter__(self):
             return self
 
@@ -62,6 +66,7 @@ async def test_judge0_sends_auth_token_using_ce_header(monkeypatch):
     assert result == {"token": "submission-token"}
     assert requests[0][2]["X-Auth-Token"] == "test-auth-token"
     assert "Authorization" not in requests[0][2]
+    assert client_options[0]["trust_env"] is False
 
 
 @pytest.mark.asyncio
@@ -80,6 +85,9 @@ async def test_poll_returns_completed_judge0_status_without_waiting(monkeypatch)
             return next(statuses)
 
     class FakeClient:
+        def __init__(self, **_kwargs):
+            pass
+
         async def __aenter__(self):
             return self
 

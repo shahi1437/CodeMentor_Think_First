@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { AppShell } from '@/components/layout/AppShell';
 import { BackendRequestError, backendRequest } from '@/lib/backend';
+import { problemDifficultyLabel } from '@/lib/problem-catalog';
 
 interface ProblemRecord {
   id: string;
@@ -91,9 +92,7 @@ function ProblemCatalog({ initialMode }: { initialMode: string }) {
       (p.tags || []).some((t) => t.toLowerCase().includes(searchTerm.toLowerCase())) ||
       p.description.toLowerCase().includes(searchTerm.toLowerCase());
 
-    const difficultyLabel = ({ beginner: 'Easy', intermediate: 'Medium', advanced: 'Hard' } as Record<string, string>)[
-      p.difficulty.toLowerCase()
-    ] || p.difficulty;
+    const difficultyLabel = problemDifficultyLabel(p.difficulty);
     const matchesDifficulty =
       selectedDifficulty === 'all' || difficultyLabel.toLowerCase() === selectedDifficulty.toLowerCase();
 
@@ -280,11 +279,7 @@ function ProblemCatalog({ initialMode }: { initialMode: string }) {
                 const isDebugging =
                   problem.problem_mode === 'debugging' ||
                   (problem.problem_mode === 'both' && selectedMode === 'debugging');
-                const difficultyLabel = ({
-                  beginner: 'Easy',
-                  intermediate: 'Medium',
-                  advanced: 'Hard',
-                } as Record<string, string>)[problem.difficulty.toLowerCase()] || problem.difficulty;
+                const difficultyLabel = problemDifficultyLabel(problem.difficulty);
                 const targetUrl =
                   isDebugging
                     ? `/workspace/debugging/${problem.id}`

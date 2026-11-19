@@ -14,6 +14,7 @@ import {
 import { AppShell } from '@/components/layout/AppShell';
 import { CodeEditor } from '@/components/ui/CodeEditor';
 import { backendRequest, type PlatformRunResult } from '@/lib/backend';
+import { problemDifficultyLabel } from '@/lib/problem-catalog';
 
 type Language = 'python' | 'javascript' | 'cpp';
 interface ProblemRecord {
@@ -311,12 +312,12 @@ export default function NormalCodingWorkspace() {
               <span className="font-bold text-white">{problem.title}</span>
               <span
                 className={`rounded px-1.5 py-0.2 text-[10px] font-semibold ${
-                  problem.difficulty === 'Easy'
+                  problemDifficultyLabel(problem.difficulty) === 'Easy'
                     ? 'text-emerald-400 bg-emerald-500/10'
                     : 'text-amber-400 bg-amber-500/10'
                 }`}
               >
-                {problem.difficulty}
+                {problemDifficultyLabel(problem.difficulty)}
               </span>
             </div>
           </div>

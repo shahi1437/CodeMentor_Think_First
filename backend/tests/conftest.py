@@ -1,6 +1,6 @@
 import pytest
 
-from backend.app.core import role_store
+from backend.app.core import database, role_store
 from backend.app.core.config import settings
 from backend.app.schemas.auth import UserRole
 
@@ -26,4 +26,5 @@ def isolate_auth_configuration(monkeypatch):
     monkeypatch.setattr(settings, "SUPABASE_JWT_SECRET", "test-only-jwt-signing-key-for-codementor")
     repository = FakeRoleRepository()
     monkeypatch.setattr(role_store, "_role_repository", repository)
+    monkeypatch.setattr(database, "_database_service", database.DatabaseService())
     return repository

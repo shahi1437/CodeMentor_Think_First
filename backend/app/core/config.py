@@ -1,7 +1,26 @@
+import os
 from pathlib import Path
 from typing import List
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _normalize_no_proxy_hosts() -> None:
+    # httpx rejects bracketed IPv6 entries in NO_PROXY before Supabase clients start.
+    for name in ("NO_PROXY", "no_proxy"):
+        value = os.environ.get(name)
+        if not value:
+            continue
+        entries = []
+        for entry in value.split(","):
+            host = entry.strip()
+            if host.startswith("[") and host.endswith("]") and ":" in host[1:-1]:
+                host = host[1:-1]
+            entries.append(host)
+        os.environ[name] = ",".join(entries)
+
+
+_normalize_no_proxy_hosts()
 
 
 class SupabaseConfigurationError(RuntimeError):
