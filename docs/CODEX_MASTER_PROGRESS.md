@@ -1,5 +1,98 @@
 # CodeMentor AI — Master Progress Tracker
 
+## Verified platform milestones checkpoint · ১৯ নভেম্বর ২০২৬
+
+এই checkpoint-এ user-এর আলাদা অনুমোদিত scope-এর ভেতরে logical backup, Judge0 cgroup-v2 সমাধান, ৮টি verified problem publish এবং real student end-to-end যাচাই সম্পন্ন হয়েছে। কোনো pending migration অনুমতি ছাড়া apply করা হয়নি, কোনো credential print/log করা হয়নি, এবং কোনো commit/push/merge/deploy করা হয়নি।
+
+### Phase 1 — Database backup ও isolated restore
+
+- **PASS — logical backup:** `C:\Users\hafij\Documents\codementor_backups\20261119\schema_public.sql` (43,645 bytes, SHA-256 `b015279ebbd75894b2bd210b759361313665ffcfcb72334ec614743d8d77f4bc`) এবং `data_public.sql` (4,981 bytes, SHA-256 `60f74ffc47eb836976adc47ae7fd64172af30b63df5b78637bf00f354ead862c`)।
+- **PASS — isolated restore:** `public.ecr.aws/supabase/postgres:17.12.0.000` container-এ (Supabase-managed `auth` schema/roles stub সহ) schema+data restore exit 0; ফল: 16 tables, `profiles=2`, `problems=0`, `problem_test_cases=0`, `submissions=0`, RLS-enabled tables=16, policies=27, FKs=20, indexes=30। verify container পরে মুছে ফেলা হয়েছে; মূল volume অক্ষত।
+- Restore test-এ `auth.users`, `auth.uid()` ও Supabase roles stub করতে হয়েছে — এটি Supabase-managed object, backup-এ নেই।
+- **নোট:** আগের এক `supabase db dump --dry-run` আউটপুটে plaintext `PGPASSWORD` দেখা গিয়েছিল; সেই temp файлы সঙ্গে সঙ্গে মুছে ফেলা হয়েছে, কোথাও commit/log হয়নি, এবং dry-run আর চালানো হয়নি।
+
+### Phase 2 — Migrations
+
+- Remote applied: `20261121000300` (execution quota), `20261121000400` (problem authoring), `20261121000600` ('mentor' action)।
+- **PENDING (অনুমতি ছাড়া apply করা হয়নি):** `20261121000100`, `20261121000200`, `20261121000500`।
+- `db push` ব্যবহার করা হয়নি, কারণ সেটি সব pending migration একসাথে apply করবে।
+
+### Phase 3 — Judge0 CE
+
+- **BLOCKER যাচাই:** official `judge0/judge0:1.13.1` image-এর isolate cgroup v1 চায়; এই machine-এর Docker Desktop/WSL2 শুধু cgroup v2 দেয়। ফলে প্রতিটি submission status 13, `Failed to create control group /sys/fs/cgroup/memory/box-1/`। Image-এ কোনো cgroup-v2 toggle নেই।
+- **সমাধান (user-approved):** third-party community build `mrkushalsm/judge0:latest` (upstream Judge0 + patched `ioi/isolate`) লোকাল `docker-compose.cgv2.yml` দিয়ে চালানো হয়েছে; worker-এ `cgroup: host`, port শুধু `127.0.0.1:2358`, fresh project `judge0-cgv2` (আগের volume অক্ষত)। এই compose file repo-র বাইরে Judge0 ফোল্ডারে আছে।
+- **PASS — real execution matrix:** authenticated `/about` version 1.13.1; accepted (`stdout=12`), Python syntax error → status 11, runtime error → status 11, `cpu_time_limit=1` timeout → status 5।
+- `backend/app/core/judge0.py`-এ `trust_env=False` রাখা হয়েছে যাতে local proxy env Judge0 call ভাঙতে না পারে।
+- **সীমাবদ্ধতা:** community image third-party ও privileged mode-এ চলে; শুধু localhost bind এবং disposable test environment-এ ব্যবহার হয়েছে। Production-এ যাওয়ার আগে digest pin ও স্বাধীন build/audit দরকার।
+
+### Phase 4–5 — Admin authoring ও problem publish
+
+- Owner admin আগেই promote হয়েছে; real admin API endpoints (`/admin/problems`, `/admin/problems/{id}/state`) দিয়ে ৮টি original Python problem draft তৈরি → Judge0 reference verification → publish সম্পন্ন হয়েছে (প্রতিটির `revision=2`, `verified_revision=2`)। `--apply` seed bypass ব্যবহার করা হয়নি।
+- Published: Even Sum Snapshot `f76470be-…`, Delivery Fee Bands `13424637-…`, Longest Bit Streak `6eaa3a94-…`, Balanced Bracket Validator `b34bfc78-…`, Second Largest Distinct Value `962138f3-…`, Rotation Match `5d6aa151-…`, Minimum Coin Count `b9223226-…`, Maximum Subarray Sum `75710383-…` (সম্পূর্ণ UUID DB-তে)।
+- ৩৮টি case (৮ public, ৩০ hidden) verified; public API-তে hidden case কখনো ফেরত যায় না।
+
+### Phase 6 — Live API ও browser E2E (disposable student)
+
+- **PASS — API:** health ok; admin published=8; catalog visible=8; public detail-এ `test_cases`/`reference_solutions` leak নেই; samples-এ hidden নেই; submit verdict=`accepted` (৫/৫, normal ও debugging); submission history persisted; admin dashboard-এ `judge0=configured`; execute status accepted/runtime_error/runtime_error/time_limit_exceeded।
+- **PASS — quota:** student-এর টানা ৩টি submit 200, ৪র্থটিতে **429 + `Retry-After: 37`**।
+- **PASS — browser E2E:** disposable student login → Problem Hub ৮টি challenge ও mode filter → Even Sum Snapshot workspace-এ Run Samples accepted (15 ms, output `14`) → Submit 4/4 passed → Submissions tab-এ Accepted entry → Longest Bit Streak Debugging Lab-এ Run Sample ও Verify Fix **4/4 regression passed** → dashboard ২টি solved, 100% accepted (৫ accepted / ৫), ৫টি recent submission persisted।
+- **PASS — role isolation:** student token-এ `/admin/problems` ও `/platform/admin/dashboard-summary` → 403; `/auth/me` role=student; samples-এ শুধু public case।
+
+### Phase 7 — Regression
+
+- Backend: **150 passed, 3 skipped** (2 Starlette deprecation warnings)।
+- Frontend: **11 passed / 0 failed**; `eslint .` clean; `tsc --noEmit` clean; production build exit 0 (all routes compiled, `ƒ Proxy (Middleware)`)।
+
+### বাকি কাজ ও নোট
+
+- `20261121000100`, `20261121000200`, `20261121000500` এখনো pending — আলাদা approval ছাড়া apply হবে না।
+- Disposable test student `student.e2e.20261119@example.com` এবং local helper `127.0.0.1:8765` এখনো চালু; ইচ্ছা করলে পরে নিষ্ক্রিয়/মুছে ফেলা যাবে।
+- সব code/doc পরিবর্তন working tree-তে uncommitted; কোনো commit/push হয়নি।
+- Judge0 community image digest pin করা হয়নি; demo-র পর official-supported Linux VM/hosted path-এ migrate করার পরামর্শ রইল।
+
+## Migration 00400 applied checkpoint · ১৯ নভেম্বর ২০২৬
+
+ব্যবহারকারীর আলাদা অনুমোদনের পর শুধু `20261121000400_problem_authoring.sql` production-এ apply করা হয়েছে। অন্য কোনো pending migration apply করা হয়নি, কোনো problem insert/publish বা role change করা হয়নি।
+
+- **PASS — 00400 apply ও live verification:** `problems` table-এ `revision` (`bigint NOT NULL DEFAULT 1`), `verified_revision`, `archived_at`, `reference_solutions` (`jsonb DEFAULT '{}'`), `debugging_starter_code` (`jsonb DEFAULT '{}'`) Columns আছে।
+- **PASS — constraint:** `archived_problem_unpublished` CHECK constraint live আছে; এটি archived problem-কে published থাকতে দেয় না।
+- **PASS — RPC:** `save_problem_draft(uuid,bigint,uuid,jsonb)` এবং `change_problem_state(uuid,bigint,text)` live আছে; দুটিই SECURITY INVOKER।
+- **PASS — security:** `anon` ও `authenticated`-এর `problems`/`problem_test_cases` INSERT, UPDATE, DELETE privilege `false`; `service_role`-এর দুটি RPC EXECUTE privilege `true`; anon-এর RPC EXECUTE `false`।
+- **PASS — history:** Live schema verification-এর পরে `migration repair --status applied 20261121000400` চালানো হয়েছে; `migration list`-এ 00400 remote-এ applied দেখাচ্ছে।
+- **PASS — schema cache:** `notify pgrst, 'reload schema'` সফলভাবে চালানো হয়েছে।
+- **ডেটা অপরিবর্তিত:** `problems = 0`, `problem_test_cases = 0`, `profiles = 1` (student)।
+- **PENDING:** `20261121000100`, `20261121000200`, `20261121000300`, `20261121000500`, `20261121000600` এখনো apply হয়নি। `00300` inspection অনুযায়ী table/function live-এ নেই, `date_bin` কাজ করে এবং শুধু service_role access পাবে; Run/Submit-এর জন্য এটি দরকার, তাই আলাদা approval অপেক্ষায় আছে।
+- **BLOCKED:** Judge0 `http://localhost:2358` configured, কিন্তু Docker নেই এবং WSL-এ কোনো distro নেই; Judge0 offline। Docker/WSL install-এর আগে approval দরকার।
+- **BLOCKED:** live DB-তে ০ admin, ১ student; admin bootstrap/role change-এর আগে approval দরকার।
+- এই checkpoint-এ কোনো commit, push, merge, deploy, problem seed/publish বা admin role change করা হয়নি।
+
+## Blocked platform setup checkpoint · ১৯ নভেম্বর ২০২৬
+
+এই checkpoint-এ কোনো production migration, problem seed/publish বা role change করা হয়নি। শুধু read-only database inspection, local validation, automated tests, checksummed logical backup এবং documentation সম্পন্ন হয়েছে।
+
+### Database backup
+
+- **PASS — checksummed logical backup:** `C:\Users\hafij\AppData\Local\CodeMentorBackups\codementor_backup_20261119T054936Z.zip` (Git-এর বাইরে, per-user AppData)।
+- Backup-এ ১৫টি public table, ১টি profile row, ১টি sanitized auth-user metadata এবং ৫টি applied migration history আছে; auth password hash/session token/service-role key/JWT secret/Judge0 token নেই।
+- Internal checksum verification এবং independent SHA-256 verification পাস করেছে। SHA-256: `ddbc8057982219ccbdc1f0149b53ef8b8586e7805df04d98e1437632111a149c`।
+- **সীমাবদ্ধতা:** এই machine-এ `pg_dump`, `pg_restore`, `psql`, Docker বা WSL distro নেই। তাই native `pg_dump` restore test করা যায়নি; backup-টি schema migrations + JSON data export হিসেবে verified, কিন্তু isolated database-এ restore test বাকি।
+
+### Migration ও blocker অবস্থা
+
+- Remote applied: `20261117`, `20261118`, `20261118000100`, `20261119`, `20261120`।
+- Pending: `20261121000100`, `20261121000200`, `20261121000300`, `20261121000400`, `20261121000500`, `20261121000600`।
+- `20261121000400_problem_authoring.sql`-এর columns, constraint এবং RPC live DB-তে অনুপস্থিত; migration-টি additive এবং `20261120` dependency already applied।
+- `20261121000300_execution_quota.sql`-এর `consume_execution_quota` RPC live DB-তে অনুপস্থিত। `/execute` ও `/submit` এটি ব্যবহার করে, তাই Judge0-এর পাশাপাশি এই migration-ও Run/Submit-এর জন্য দরকার।
+- **BLOCKED:** 00400 apply করার explicit approval প্রয়োজন; তারপর 0003-এর জন্য আলাদা approval প্রয়োজন। `db push` ব্যবহার করা হবে না, কারণ সেটি সব pending migration একসাথে apply করবে।
+- **BLOCKED:** Judge0 `localhost:2358`-এ unreachable; Docker/WSL2 install/system change-এর approval প্রয়োজন। Live Judge0 verification ছাড়া publishing করা হবে না।
+- **BLOCKED:** live DB-তে ০ জন admin, ১ জন student; admin bootstrap/role change-এর জন্য আলাদা approval প্রয়োজন। Student-কে silently elevate করা হবে না।
+
+### Tests ও files
+
+- Backend: **150 passed, 3 skipped**; Frontend: **11 passed**; seed validation: **8/8 PASS** (38 cases)।
+- `backend/scripts/seed_problem_catalog.py`-এ exact backend `ProblemDraft` Pydantic contract validation যোগ করা হয়েছে; `--apply` path এখনো API-level admin authorization ও Judge0 verification bypass করে, তাই সেটি চালানো হয়নি।
+- কোনো commit, push, merge, deploy বা production table/data/migration write করা হয়নি।
+
 ## Visual Code Analyzer milestone · ১৯ নভেম্বর ২০২৬
 
 Analyzer-এর পুরোনো preset/simulation UI সরিয়ে বাস্তব authenticated Python AST analysis যুক্ত করা হয়েছে। Source code কখনো execute করা হয় না; শুধু backend-এ parse করা হয়। Commit, push, merge, deploy বা production database migration চালানো হয়নি।
